@@ -79,7 +79,8 @@ hosts directly). "Unverified" means reported by third parties only.
 - [ ] Set-code alias table for Dragon Shield → Scryfall mismatches.
 - [ ] Archidekt authenticated client (private decks, collection read/write) once verified against live responses.
 - [ ] More formats: Moxfield, ManaBox, Deckbox CSV (see MtgCsvHelper mappings).
-- [ ] "What do I own from this deck?" by diffing an Archidekt deck against a Dragon Shield collection.
+- [x] "What do I own from this deck?" by diffing an Archidekt deck against a Dragon Shield collection (`delta.shortfall`).
+- [x] Snapshot deltas between exports (`delta.diff`).
 - [ ] Optional MCP server exposing these tools to Claude.
 
 ## Sources

@@ -7,7 +7,8 @@ A Python library for Magic: The Gathering projects: card data, pricing, decks an
 | `mtg_toolkits.scryfall` | Scryfall client: card lookup, search, batched `/cards/collection`, bulk data, prices |
 | `mtg_toolkits.archidekt` | Archidekt client (unofficial API): public decks, deck search, collection CSV export |
 | `mtg_toolkits.dragonshield` | Dragon Shield Card Manager CSV reader and writer |
-| `mtg_toolkits.delta` | Diffs collection snapshots (added/removed/changed), writes only the changes, finds what a deck is missing |
+| `mtg_toolkits.delta` | Diffs collection snapshots (added/removed/changed), writes only the changes, deck coverage (owned/partial/missing) |
+| `mtg_toolkits.decklist` | Parses pasted decklists (Archidekt, Moxfield, Arena, MTGO formats, sections, foil/etched) and deck URLs |
 | `mtg_toolkits.enrich` | Joins a collection with Scryfall text, attributes and prices, and writes a report |
 
 See [`docs/research.md`](docs/research.md) for API notes, limits, file formats and the pricing strategy.
@@ -62,6 +63,16 @@ delta.write_csv(d, "changes.csv")        # human-readable change report
 
 delta.diff(old, new, delta.BY_COPY, folders=True)  # stricter: condition, language, binder moves
 missing = delta.shortfall(deck.to_entries(), owned=new)   # deck vs collection, by card name
+```
+
+Check a pasted decklist against your collection:
+
+```python
+from mtg_toolkits import decklist, delta
+
+deck = decklist.parse_text(open("deck.txt").read())      # or ArchidektClient().get_deck(id).to_entries()
+for line in delta.coverage(deck.to_entries(), owned=new):
+    print(line.status, line.have, "/", line.need, line.entry.name)   # owned / partial / missing
 ```
 
 ## Tests

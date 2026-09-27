@@ -235,6 +235,46 @@ def shortfall(
     return diff(owned, needed, by).gains()
 
 
+@dataclass
+class CoverageLine:
+    """How much of one needed card a collection covers."""
+
+    entry: CollectionEntry  # representative needed entry, quantity = copies needed
+    have: int
+
+    @property
+    def need(self) -> int:
+        return self.entry.quantity
+
+    @property
+    def missing(self) -> int:
+        return max(0, self.need - self.have)
+
+    @property
+    def status(self) -> str:
+        if self.have >= self.need:
+            return "owned"
+        return "partial" if self.have > 0 else "missing"
+
+
+def coverage(
+    needed: Iterable[CollectionEntry], owned: Iterable[CollectionEntry], by: Iterable[str] = BY_CARD
+) -> list[CoverageLine]:
+    """Per-card coverage of ``needed`` (e.g. a decklist) by ``owned``.
+
+    Each line reports ``have``/``need``/``missing`` and a status of
+    ``"owned"``, ``"partial"`` or ``"missing"``. Matches on card name by default,
+    so any printing you own counts. Multiply ``missing`` by a price from
+    :mod:`mtg_toolkits.enrich` to get the cost to complete.
+    """
+    fields = _fields(by, False)
+    have = aggregate(owned, fields)
+    return [
+        CoverageLine(entry, have[k].quantity if k in have else 0)
+        for k, entry in aggregate(needed, fields).items()
+    ]
+
+
 DIFF_CSV_COLUMNS = [
     "Change", "Delta", "Old Quantity", "New Quantity", "Name", "Set Code", "Collector Number",
     "Finish", "Condition", "Language", "Folder", "Scryfall ID",

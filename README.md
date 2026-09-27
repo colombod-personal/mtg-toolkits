@@ -82,3 +82,27 @@ pytest
 ```
 
 Tests use `httpx.MockTransport` and never touch the network.
+
+## Data sources & thanks
+
+This library is a thin layer over other people's generous work. If you build on it, please
+credit them in your app too.
+
+- **[Scryfall](https://scryfall.com)**: card data, images, bulk files and daily prices, which Scryfall sources
+  from TCGplayer, Cardmarket and Cardhoarder. Follow [Scryfall's API terms](https://scryfall.com/docs/api):
+  - send a descriptive User-Agent and respect the rate limits
+  - don't paywall the data or imply that Scryfall endorses you
+  - never crop card images or hide the artist credit
+
+  [Support Scryfall](https://scryfall.com/donate).
+- **[Archidekt](https://archidekt.com)**: public deck data through its open read API. Archidekt asks that you
+  link back to it when you publish its data, and that you go easy on the API.
+  [Support Archidekt](https://patreon.com/archidekt).
+- **[Dragon Shield](https://mtg.dragonshield.com)** Card Manager: the CSV format this library reads and writes.
+  Dragon Shield is a trademark of Arcane Tinmen ApS; this project isn't affiliated with them.
+- Research help from [MtgCsvHelper](https://github.com/StepKie/MtgCsvHelper) and
+  [pyrchidekt](https://github.com/linkian209/pyrchidekt).
+
+mtg-toolkits is unofficial Fan Content permitted under the
+[Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy). Not approved/endorsed by Wizards.
+Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.

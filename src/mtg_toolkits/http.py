@@ -44,6 +44,8 @@ class BaseClient:
     base_url: str = ""
     min_interval: float = 0.1
     max_retries: int = 3
+    # Seconds to wait after a 429 without Retry-After (Scryfall locks you out for 30 s).
+    rate_limit_backoff: float = 30.0
 
     def __init__(
         self,
@@ -77,7 +79,13 @@ class BaseClient:
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt < self.max_retries:
                     retry_after = resp.headers.get("Retry-After")
-                    time.sleep(float(retry_after) if retry_after and retry_after.isdigit() else 2**attempt)
+                    if retry_after and retry_after.isdigit():
+                        delay = float(retry_after)
+                    elif resp.status_code == 429:
+                        delay = self.rate_limit_backoff
+                    else:
+                        delay = 2**attempt
+                    time.sleep(delay)
                     continue
             return resp
         return resp  # pragma: no cover

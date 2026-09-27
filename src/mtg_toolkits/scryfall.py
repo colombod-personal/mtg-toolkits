@@ -7,13 +7,18 @@ prices. Usage rules worth knowing:
 * Keep traffic under 10 requests/second (50-100 ms between calls); the
   ``/cards/collection``, ``/cards/search``, ``/cards/named`` and ``/cards/random``
   endpoints are throttled harder, so we space those 500 ms apart.
+* A 429 response locks the client out for 30 seconds; repeated overload can
+  get the application banned. We back off for 30 s on 429.
 * Prices are refreshed roughly once a day and "should be considered dangerously
-  stale after 24 hours". For bulk work, use the bulk-data files instead of
+  stale after 24 hours". For bulk work, use the bulk-data files (gzipped JSON
+  Lines, hosted on ``data.scryfall.io`` without rate limits) instead of
   hammering the API.
 """
 
 from __future__ import annotations
 
+import gzip
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -202,12 +207,16 @@ class ScryfallClient(BaseClient):
         return self._get_json("/bulk-data").get("data", [])
 
     def download_bulk(self, bulk_type: str, dest: str | Path) -> Path:
-        """Stream a bulk-data file (e.g. ``"default_cards"``) to ``dest``."""
+        """Stream a bulk-data file (e.g. ``"default_cards"``) to ``dest``.
+
+        Files are gzipped JSON Lines (``.jsonl.gz``); read them with :func:`iter_bulk_file`.
+        """
         entry = next((b for b in self.bulk_data() if b["type"] == bulk_type), None)
         if entry is None:
             raise ValueError(f"Unknown bulk data type: {bulk_type}")
+        uri = entry.get("jsonl_download_uri") or entry["download_uri"]
         dest = Path(dest)
-        with self._client.stream("GET", entry["download_uri"]) as resp:
+        with self._client.stream("GET", uri) as resp:
             resp.raise_for_status()
             with dest.open("wb") as fh:
                 for chunk in resp.iter_bytes():
@@ -240,3 +249,20 @@ class ScryfallClient(BaseClient):
                 card = by_name.get(ident["name"].lower())
             results.append((entry, card))
         return results
+
+
+def iter_bulk_file(path: str | Path) -> Iterator[dict[str, Any]]:
+    """Stream objects from a downloaded bulk file without loading it all into memory.
+
+    Handles the current ``.jsonl.gz`` format and plain ``.jsonl``. For card
+    files, wrap each object with :meth:`Card.from_json`.
+    """
+    path = Path(path)
+    with path.open("rb") as raw:
+        gzipped = raw.read(2) == b"\x1f\x8b"
+    opener = gzip.open if gzipped else open
+    with opener(path, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                yield json.loads(line)

@@ -1,7 +1,8 @@
 """Client for Archidekt's (unofficial, undocumented) JSON API.
 
-Archidekt has no published API docs; the maintainers have said the deck
-endpoint is stable enough to use but may change without notice. Known endpoints:
+Archidekt has no published API docs. The maintainers say the read API is
+"open and public" but may change without notice, and ask that public use of
+the data links back to Archidekt. Known endpoints:
 
 * ``GET /api/decks/{id}/`` -- full public deck, including every card's
   Scryfall id (``card.uid``), edition, finish (``modifier``) and categories.

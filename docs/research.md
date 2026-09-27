@@ -1,8 +1,9 @@
 # Data source research
 
 Notes from surveying the services this toolkit talks to (September 2026).
-"Verified" means covered by code and tests in this repo. "Unverified" means
-reported by third parties and not yet checked against live responses.
+"Verified" means checked against the live docs or live API responses (fetched
+through a web-extraction service, because this sandbox can't reach these
+hosts directly). "Unverified" means reported by third parties only.
 
 ## Summary
 
@@ -19,24 +20,28 @@ reported by third parties and not yet checked against live responses.
 ## Scryfall — https://scryfall.com/docs/api
 
 * **Headers are mandatory.** A descriptive `User-Agent` and an `Accept` header are required, and generic or missing values get blocked. Our `BaseClient` sets both.
-* **Rate limit.** Keep sustained traffic under 10 req/s (50–100 ms between calls). `/cards/collection` has a hard cap of about 2 req/s, and search/named/random are also treated as expensive. The client spaces those "slow" endpoints 500 ms apart and everything else 100 ms apart. It retries on 429/5xx and honours `Retry-After`.
+* **Rate limits (verified, [docs](https://scryfall.com/docs/api/rate-limits)):** `/cards/search`, `/cards/named`, `/cards/random` and `/cards/collection` allow 2/s (500 ms), `/cards/manifest` allows 10/min, and everything else allows 10/s (100 ms). `*.scryfall.io` file downloads have no limit. A **429 locks you out for 30 s**, ignoring 429s is "not acceptable", and repeated overload can get the app banned. The client uses exactly these intervals and waits 30 s after a 429 (or honours `Retry-After`).
 * **Key endpoints (implemented):**
   * `GET /cards/named?exact=|fuzzy=&set=` looks up a card by name.
   * `GET /cards/search?q=&unique=&order=` does a paginated full-text search. A search with no results returns **404**, which we treat as empty.
   * `POST /cards/collection` resolves up to **75** identifiers per call (`id`, `name`, `name+set`, `set+collector_number`, `multiverse_id`, `oracle_id`, `illustration_id`, `mtgo_id`). Responses include `not_found`.
   * `GET /cards/{id}` and `GET /cards/{set}/{number}[/{lang}]`
-  * `GET /bulk-data` lists the bulk files: `oracle_cards`, `unique_artwork`, `default_cards`, `all_cards`, `rulings`. These are regenerated every 12 hours and are the right tool for whole-collection work or offline caches.
+  * `GET /bulk-data` lists the bulk files: `oracle_cards` (about 23 MB), `unique_artwork`, `default_cards` (about 75 MB), `all_cards` (about 375 MB), `rulings`, `art_tags`, `oracle_tags`. **They are now gzipped JSON Lines** (`.jsonl.gz`), and the URL is in `jsonl_download_uri` (verified). Scryfall says to use them "if you need to rapidly look up card names, prices, or resolve a large number of card images". `download_bulk()` and `iter_bulk_file()` handle them.
+  * `GET /cards/manifest` reports what changed, which is useful for incremental cache refresh (not implemented yet).
 * **Prices.** `prices.{usd,usd_foil,usd_etched,eur,eur_foil,eur_etched,tix}` are strings or `null`, updated about once a day. Scryfall warns they are "dangerously stale" after 24 hours, so don't treat them as live market data, and cache per day. The link to the vendor listings is in `purchase_uris`.
 * **Double-faced cards.** Top-level `mana_cost`, `oracle_text` and `image_uris` are absent. They live in `card_faces[]`, and `Card.from_json` merges them.
 * **Terms.** Scryfall data is free to use. Don't paywall it, and don't re-host the images as your own. See https://scryfall.com/docs/api#use-of-scryfall-data-and-images.
 
 ## Archidekt — no official docs
 
-* The maintainers (a two-person team) have said on the forum that they won't publish API docs, but the deck endpoint is fairly stable. Expect breakage.
-* `GET https://archidekt.com/api/decks/{id}/` returns the full deck. The fields we rely on (confirmed against the `pyrchidekt` library's parser):
+* **Policy (verified, [forum reply from dev "michael"](https://archidekt.com/forum/thread/40353)):** they won't publish or maintain docs, but "our API is open and public (as far as reading is concerned)". Reverse-engineering from the browser network tab is fine. If you post their data publicly, **link back to Archidekt**. If third-party traffic becomes a problem they will lock the API down, so be gentle.
+* `GET https://archidekt.com/api/decks/{id}/` returns the full deck (about 330 KB for a 100-card deck). Card fields were verified against a live response. The fields we rely on:
   * deck: `id, name, deckFormat (int), owner{username}, description, categories[{name, includedInDeck, includedInPrice, isPremier}], cards[]`
-  * card entry: `quantity, modifier ("Normal"/"Foil"/"Etched"), categories[], deletedAt, card{uid (= Scryfall id), collectorNumber, edition{editioncode, editionname}, oracleCard{name, manaCost, text, types, cmc, colorIdentity, ...}, prices{tcg, ck, cm, ...}}`
-* `GET /api/decks/v3/?name=&ownerUsername=&commanderName=&cardName=&deckFormat=&orderBy=&page=` searches decks. It returns `{count, next, results[]}` with about 50–60 results per page. `pageSize` seems to be ignored, and unknown `orderBy` values are silently ignored. `ownerUsername` is unverified.
+  * card entry: `quantity, modifier ("Normal"/"Foil"/"Etched"), categories[], deletedAt, card{uid (= Scryfall id), collectorNumber, edition{editioncode, editionname}, oracleCard{name, manaCost, text, types, cmc, colorIdentity, ...}, prices{tcg, tcgfoil, ck, ckfoil, cm, cmfoil, scg, cardTrader, mtgo, ... plus *Minimum variants}}`. There are also vendor ids (`tcgProductId`, `ckNormalId`, `ckFoilId`, `scgSku`, `cardTraderSku`), which are handy for vendor price lookups.
+  * `oracleCard` includes Archidekt extras: `edhrecRank`, `salt`, `gameChanger`, `tutor`, `extraTurns`, `massLandDenial` and combo ids (`atomicCombos`, `potentialCombos`).
+  * `description` is Quill "delta" JSON (`{"ops": [...]}`), not plain text.
+* `GET /api/decks/v3/?name=&ownerUsername=&commanderName=&cardName=&deckFormat=&orderBy=&page=` searches decks. It returns `{count, next, results[{id, name, size, updatedAt, createdAt, deckFormat, edhBracket, featured, ...}]}` (verified: `ownerUsername=Wildcard` returned `count: 21`). There are about 50–60 results per page. `pageSize` seems to be ignored, and unknown `orderBy` values are silently ignored.
+* The older `/api/decks/cards/?owner=&ownerexact=true` route now answers "Client Unavailable", so don't use it.
 * Format ids: 1 Standard, 2 Modern, 3 Commander, 4 Legacy, 5 Vintage, 6 Pauper, 7 Custom, 8 Frontier, 9 Future Std, 10 Penny, 11 1v1 Cmdr, 12 Duel Cmdr, 13 Brawl, 14 Oathbreaker, 15 Pioneer, 16 Historic, 17 Pauper Cmdr, 18 Alchemy, 19 Explorer, 20 Historic Brawl.
 * **Private decks and collections** require an account. Login is reportedly `POST /api/rest-auth/login/`, returning a JWT for `Authorization: JWT <token>`. This is unverified and not implemented. The collection importer accepts CSV with arbitrary headers mapped in the UI. `write_collection_csv` produces `Quantity, Name, Finish, Condition, Date Added, Language, Purchase Price, Tags, Edition Name, Edition Code, Collector Number, Scryfall ID`.
 * Archidekt's conditions are `NM/LP/MP/HP/D`, finishes `Normal/Foil/Etched`, and languages `EN, JP, KR, CS, CT, …`.
@@ -44,7 +49,8 @@ reported by third parties and not yet checked against live responses.
 
 ## Dragon Shield Card Manager / MTG Scanner
 
-* There is no public API. Data leaves the app as a CSV export (whole collection or per folder), and the card manager also imports CSV.
+* There is no public API, no developer docs, and no third-party "sign in with Dragon Shield" (OAuth) access. Data leaves the app as a CSV export (whole collection or per folder), and the card manager also imports CSV.
+* Collections live server-side (cloud sync, friends can view collections). The web app is at `mtg.dragonshield.com` and the account/login site at `auth.dragonshield.com`, so an internal API exists behind the web app. Automating it would mean reusing a user's logged-in session token against undocumented endpoints. That's brittle, and possibly against their T&C (the licence is "limited … for the purpose of accessing them"). **Next step if wanted:** capture a HAR of the web app loading folders (with credentials stripped) to map those endpoints, and/or ask Dragon Shield about partner access.
 * The observed layout starts with an Excel `sep=,` line:
   `Folder Name, Quantity, Trade Quantity, Card Name, Set Code, Set Name, Card Number, Condition, Printing, Language, Price Bought, Date Bought, LOW, MID, MARKET`
 * Values:
@@ -63,7 +69,8 @@ reported by third parties and not yet checked against live responses.
 
 1. **Default:** use Scryfall prices from `/cards/collection`, which is already done by `enrich()`. It's free, gives USD and EUR, and has foil/etched splits.
 2. **History and vendor spread:** use MTGJSON `AllPricesToday.json` (daily) and `AllPrices.json` (about 90 days), keyed by MTGJSON UUID. Map to it through `AllIdentifiers` → `scryfallId`.
-3. **Large collections:** download Scryfall's `default_cards` bulk file once a day and price locally. Don't make thousands of API calls.
+3. **Large collections:** download Scryfall's `default_cards` bulk file (`.jsonl.gz`) once a day and price locally with `iter_bulk_file()`. Don't make thousands of API calls.
+4. **Vendor spread without extra APIs:** Archidekt deck cards already carry TCGplayer, Card Kingdom, Cardmarket, Star City Games and CardTrader prices, including foil and minimum variants.
 
 ## Ideas / next steps
 
@@ -78,7 +85,9 @@ reported by third parties and not yet checked against live responses.
 ## Sources
 
 - Scryfall API docs: https://scryfall.com/docs/api and rate limits: https://scryfall.com/docs/api/rate-limits
-- Archidekt forum threads on the API: https://archidekt.com/forum/thread/40353, https://archidekt.com/forum/thread/16962481
+- Scryfall bulk data: https://scryfall.com/docs/api/bulk-data
+- Archidekt forum threads on the API: https://archidekt.com/forum/thread/40353, https://archidekt.com/forum/thread/16962481, https://archidekt.com/forum/thread/10531812
+- Dragon Shield terms: https://auth.dragonshield.com/TermsAndConditions/Index
 - pyrchidekt (Archidekt JSON field names): https://github.com/linkian209/pyrchidekt
 - MtgCsvHelper (Dragon Shield / Archidekt CSV mappings): https://github.com/StepKie/MtgCsvHelper
 - Archidekt forum, Dragon Shield import format: https://archidekt.com/forum/thread/6162413/1

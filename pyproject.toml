@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mtg-toolkits"
+version = "0.1.0"
+description = "Clients and tools for Scryfall, Archidekt and Dragon Shield Card Manager data"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+mtgtk = "mtg_toolkits.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtg_toolkits"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

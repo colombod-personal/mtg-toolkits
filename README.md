@@ -7,6 +7,7 @@ A Python library for Magic: The Gathering projects: card data, pricing, decks an
 | `mtg_toolkits.scryfall` | Scryfall client: card lookup, search, batched `/cards/collection`, bulk data, prices |
 | `mtg_toolkits.archidekt` | Archidekt client (unofficial API): public decks, deck search, collection CSV export |
 | `mtg_toolkits.dragonshield` | Dragon Shield Card Manager CSV reader and writer |
+| `mtg_toolkits.moxfield` | Moxfield collection CSV reader and writer. Moxfield has no public API; see `docs/research.md` |
 | `mtg_toolkits.delta` | Diffs collection snapshots (added/removed/changed), writes only the changes, deck coverage (owned/partial/missing) |
 | `mtg_toolkits.decklist` | Parses pasted decklists (Archidekt, Moxfield, Arena, MTGO formats, sections, foil/etched) and deck URLs |
 | `mtg_toolkits.enrich` | Joins a collection with Scryfall text, attributes and prices, and writes a report |

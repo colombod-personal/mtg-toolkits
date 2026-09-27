@@ -11,6 +11,7 @@ hosts directly). "Unverified" means reported by third parties only.
 |---|---|---|---|---|---|
 | **Scryfall** | Public REST API, no key | ✅ Complete (oracle text, faces, legalities, images, IDs) | ✅ Daily USD/EUR/TIX (TCGplayer, Cardmarket, Cardhoarder) | ❌ | Primary source. Bulk files for large jobs. |
 | **Archidekt** | Unofficial JSON API, no key for public data | Partial (embedded in deck cards) | Partial (per-vendor prices on deck cards) | ✅ Public decks; collections via CSV only | Undocumented and may change. |
+| **Moxfield** | No public API. Undocumented endpoints (`api2.moxfield.com`) behind Cloudflare; access is granted only on request (support@moxfield.com, some non-commercial uses). No OAuth for third parties | – | – | ✅ via collection CSV and deck text export | Use files. Ask Moxfield before calling its API. |
 | **Dragon Shield Card Manager** | No API; CSV export/import from the app/web | Name, set, number only | LOW/MID/MARKET in export | ✅ via CSV (folders) | Offline file format. |
 | **MTGJSON** | Free JSON/SQLite/CSV downloads | ✅ | ✅ `AllPrices` / `AllPricesToday` (TCGplayer, Cardmarket, Card Kingdom, Cardhoarder; buylist and retail) | ❌ | Best for price *history* (about 90 days) and vendor spread. |
 | **TCGplayer API** | Closed to new developers | – | ✅ | – | Not a realistic option. Use Scryfall/MTGJSON instead. |
@@ -68,6 +69,26 @@ hosts directly). "Unverified" means reported by third parties only.
 * `LOW/MID/MARKET` are Dragon Shield's own USD prices (TCGplayer-derived) at export time.
 * Existing converters for reference: [MtgCsvHelper](https://github.com/StepKie/MtgCsvHelper) (column mappings for about 10 sites), [DragonShield-to-Moxfield](https://github.com/KarmaKamikaze/DragonShield-to-Moxfield).
 
+## Moxfield: no public API
+
+- **No official API.** Moxfield publishes no developer API, and says the deck endpoints its site
+  uses "were never officially supported". It grants access for "certain non-commercial uses" by
+  e-mail (support@moxfield.com), by allow-listing the client's User-Agent. Its public issue tracker
+  (github.com/moxfield/moxfield-public, issue 143) reports that even allow-listed clients hit
+  Cloudflare challenges on the token endpoints.
+- **No delegated login.** There is no OAuth or "connect your Moxfield account" flow. Signing in
+  as the user would mean handling their Moxfield password, which isn't acceptable, and the private
+  token endpoints are behind bot protection anyway. A user's private collection therefore can't be
+  fetched on their behalf.
+- **What works:**
+  - **Collection CSV.** Moxfield → Collection → More → Export CSV (and Import CSV). The columns are
+    `Count, Tradelist Count, Name, Edition, Condition, Language, Foil, Tags, Last Modified,
+    Collector Number, Alter, Proxy, Purchase Price`. See `mtg_toolkits.moxfield`, which also
+    converts a Dragon Shield collection into a file Moxfield imports.
+  - **Deck text export.** Lines like `1 Sol Ring (C21) 263 *F*` are read by `decklist.parse_text`.
+  - **Public deck URLs.** Only with Moxfield's permission (an allow-listed User-Agent). Since the
+    Vault is free and non-commercial, it is a reasonable candidate to ask.
+
 ## Pricing strategy
 
 1. **Default:** use Scryfall prices from `/cards/collection`, which is already done by `enrich()`. It's free, gives USD and EUR, and has foil/etched splits.
@@ -84,7 +105,8 @@ hosts directly). "Unverified" means reported by third parties only.
 - [ ] More formats: Moxfield, ManaBox, Deckbox CSV (see MtgCsvHelper mappings).
 - [x] "What do I own from this deck?" by diffing an Archidekt deck against a Dragon Shield collection (`delta.shortfall`).
 - [x] Snapshot deltas between exports (`delta.diff`).
-- [ ] Optional MCP server exposing these tools to Claude.
+- [x] MCP server exposing these tools to agents (in the Vault: `/api/mcp`).
+- [ ] Moxfield public decks by URL, if Moxfield grants API access.
 
 ## Sources
 
@@ -95,3 +117,6 @@ hosts directly). "Unverified" means reported by third parties only.
 - pyrchidekt (Archidekt JSON field names): https://github.com/linkian209/pyrchidekt
 - MtgCsvHelper (Dragon Shield / Archidekt CSV mappings): https://github.com/StepKie/MtgCsvHelper
 - Archidekt forum, Dragon Shield import format: https://archidekt.com/forum/thread/6162413/1
+- Moxfield on its deck API ("never officially supported… we do offer access for certain non-commercial uses"): https://www.reddit.com/r/Moxfield/comments/1ubbry2/deck_api_no_longer_works
+- Moxfield public issue tracker, allow-listed clients and Cloudflare: https://github.com/moxfield/moxfield-public/issues/143
+- Moxfield collection CSV columns: https://software.codidact.com/posts/294785/294787

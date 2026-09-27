@@ -3,6 +3,7 @@
 - :mod:`mtg_toolkits.scryfall` -- card text, attributes, images and daily prices
 - :mod:`mtg_toolkits.archidekt` -- public decks (unofficial, undocumented API)
 - :mod:`mtg_toolkits.dragonshield` -- Dragon Shield Card Manager CSV import/export
+- :mod:`mtg_toolkits.moxfield` -- Moxfield collection CSV import/export (Moxfield has no public API)
 """
 
 from .models import CollectionEntry, Condition, Finish

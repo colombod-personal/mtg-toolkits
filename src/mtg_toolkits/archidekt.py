@@ -19,6 +19,7 @@ CSV collection import/export (see :func:`write_collection_csv`).
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -171,29 +172,31 @@ _LANG_TO_ARCHIDEKT = {"ja": "JP", "ko": "KR", "zhs": "CS", "zht": "CT"}
 _FINISH_TO_ARCHIDEKT = {Finish.NONFOIL: "Normal", Finish.FOIL: "Foil", Finish.ETCHED: "Etched"}
 
 
-def write_collection_csv(entries: Iterable[CollectionEntry], path: str | Path, *, folder_as_tag: bool = True) -> int:
-    """Write entries in a CSV layout Archidekt's collection importer can map.
+def dumps_collection_csv(entries: Iterable[CollectionEntry], *, folder_as_tag: bool = True) -> str:
+    """Entries as CSV in a layout Archidekt's collection importer can map (by header name)."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(ARCHIDEKT_CSV_COLUMNS)
+    for e in entries:
+        writer.writerow([
+            e.quantity,
+            e.name,
+            _FINISH_TO_ARCHIDEKT[e.finish],
+            _CONDITION_TO_ARCHIDEKT[e.condition],
+            e.purchase_date.isoformat() if e.purchase_date else "",
+            _LANG_TO_ARCHIDEKT.get(e.language, e.language.upper()),
+            f"{e.purchase_price:.2f}" if e.purchase_price is not None else "",
+            e.folder if folder_as_tag and e.folder else "",
+            e.set_name or "",
+            (e.set_code or "").lower(),
+            e.collector_number or "",
+            e.scryfall_id or "",
+        ])
+    return out.getvalue()
 
-    In the importer, map the columns by header name. Returns number of rows written.
-    """
-    rows = 0
-    with Path(path).open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(ARCHIDEKT_CSV_COLUMNS)
-        for e in entries:
-            writer.writerow([
-                e.quantity,
-                e.name,
-                _FINISH_TO_ARCHIDEKT[e.finish],
-                _CONDITION_TO_ARCHIDEKT[e.condition],
-                e.purchase_date.isoformat() if e.purchase_date else "",
-                _LANG_TO_ARCHIDEKT.get(e.language, e.language.upper()),
-                f"{e.purchase_price:.2f}" if e.purchase_price is not None else "",
-                e.folder if folder_as_tag and e.folder else "",
-                e.set_name or "",
-                (e.set_code or "").lower(),
-                e.collector_number or "",
-                e.scryfall_id or "",
-            ])
-            rows += 1
-    return rows
+
+def write_collection_csv(entries: Iterable[CollectionEntry], path: str | Path, *, folder_as_tag: bool = True) -> int:
+    """Write :func:`dumps_collection_csv` to ``path``. Returns the number of rows written."""
+    entries = list(entries)
+    Path(path).write_text(dumps_collection_csv(entries, folder_as_tag=folder_as_tag), encoding="utf-8")
+    return len(entries)

@@ -55,7 +55,7 @@ reported by third parties and not yet checked against live responses.
 * Quirks:
   * The column layout reportedly varies between users and app versions, so we match headers by name.
   * Double-faced cards export with the front-face name only.
-  * Some set codes follow TCGplayer rather than Scryfall (promos, lists, token sets). These show up as "unmatched" in `mtgtk dragonshield price`. The fallback is name-only lookup, or a set-code alias table (TODO).
+  * Some set codes follow TCGplayer rather than Scryfall (promos, lists, token sets). These come back with `card=None` from `enrich()`. The fallback is name-only lookup, or a set-code alias table (TODO).
 * `LOW/MID/MARKET` are Dragon Shield's own USD prices (TCGplayer-derived) at export time.
 * Existing converters for reference: [MtgCsvHelper](https://github.com/StepKie/MtgCsvHelper) (column mappings for about 10 sites), [DragonShield-to-Moxfield](https://github.com/KarmaKamikaze/DragonShield-to-Moxfield).
 

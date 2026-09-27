@@ -1,6 +1,6 @@
 # mtg-toolkits
 
-Tools and libraries for Magic: The Gathering projects: card data, pricing, decks and collections.
+A Python library for Magic: The Gathering projects: card data, pricing, decks and collections.
 
 | Module | What it does |
 |---|---|
@@ -17,18 +17,23 @@ See [`docs/research.md`](docs/research.md) for API notes, limits, file formats a
 pip install -e ".[dev]"
 ```
 
-## CLI
+## Usage
 
-```bash
-mtgtk card "Sol Ring"                     # oracle text, attributes, prices
-mtgtk card "delver" --fuzzy --json        # raw Scryfall JSON
-mtgtk search "t:dragon c:r cmc<=4" --limit 20
-mtgtk deck 123456                         # public Archidekt deck as a text list
-mtgtk dragonshield price export.csv -o report.csv            # value your collection
-mtgtk dragonshield to-archidekt export.csv archidekt.csv     # move collection to Archidekt
+```python
+from mtg_toolkits.scryfall import ScryfallClient
+from mtg_toolkits.archidekt import ArchidektClient
+
+with ScryfallClient() as sf:
+    card = sf.named("Sol Ring")
+    print(card.oracle_text, card.prices.usd, card.prices.eur)
+    dragons = list(sf.search("t:dragon c:r cmc<=4", limit=20))
+
+with ArchidektClient() as ak:
+    deck = ak.get_deck(123456)
+    print(deck.to_text())
 ```
 
-## Library
+Price a Dragon Shield collection:
 
 ```python
 from mtg_toolkits import dragonshield

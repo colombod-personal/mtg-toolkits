@@ -156,3 +156,14 @@ def test_resolve_offline_matches_like_the_api(cards):
     ]
     got = [(r.card.id if r.card else None, r.method) for r in resolve_offline(entries, bulk)]
     assert got == [("sol-ring-id", "set_number"), ("delver-id", "name_set"), ("delver-id", "name"), (None, None)]
+
+
+def test_non_json_error_raises_api_error():
+    import pytest
+
+    from mtg_toolkits.http import ApiError
+
+    with make_client(ScryfallClient, lambda r: httpx.Response(404, text="<html>nope</html>"), slow_interval=0) as sf:
+        with pytest.raises(ApiError) as exc:
+            sf.card("x")
+    assert exc.value.status_code == 404

@@ -60,3 +60,8 @@ def test_real_export_quirks():
 
 def test_real_export_roundtrip_is_lossless():
     assert dragonshield.dumps(dragonshield.parse(REAL_EXPORT)) == REAL_EXPORT
+
+
+def test_quantity_zero_stays_zero():
+    [zero, blank] = dragonshield.parse("Card Name,Quantity\nSol Ring,0\nIsland,\n")
+    assert (zero.quantity, blank.quantity) == (0, 1)

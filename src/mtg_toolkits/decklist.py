@@ -39,7 +39,9 @@ _HEADER = re.compile(r"^(?://|#)?\s*([A-Za-z ]+?)\s*:?\s*(?:\(\d+\))?$")
 _LINE = re.compile(
     r"""^(?P<qty>\d+)\s*x?\s+
         (?P<name>.+?)
-        (?:\s+[(\[](?P<set>[A-Za-z0-9_]{2,10})[)\]](?:\s+(?P<num>[A-Za-z0-9★†-]+))?)?
+        # (SET) in parentheses, or [SET] in brackets only when it looks like a set code
+        # (upper-case, 2-6 chars); anything else in brackets is an Archidekt category.
+        (?:\s+(?:\((?P<set>[A-Za-z0-9_]{2,10})\)|\[(?P<bset>[A-Z0-9]{2,6})\])(?:\s+(?P<num>[A-Za-z0-9★†-]+))?)?
         (?:\s+\*(?P<finish>[FE])\*)?
         (?:\s+\[(?P<cats>[^\]]*)\])?
         (?:\s+\^[^^]*\^)?\s*$""",
@@ -113,7 +115,7 @@ def parse_text(text: str, name: str | None = None) -> Decklist:
         lines.append(DeckLine(
             quantity=int(m["qty"]),
             name=m["name"].strip(),
-            set_code=m["set"].lower() if m["set"] else None,
+            set_code=(m["set"] or m["bset"]).lower() if (m["set"] or m["bset"]) else None,
             collector_number=m["num"],
             finish={"F": Finish.FOIL, "E": Finish.ETCHED}.get(m["finish"] or "", Finish.NONFOIL),
             section=line_section,

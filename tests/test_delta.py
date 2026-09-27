@@ -84,3 +84,11 @@ def test_write_csv(tmp_path):
     assert delta.write_csv(delta.diff(snapshot_old(), snapshot_new()), out) == 4
     rows = list(csv.DictReader(out.open()))
     assert (rows[0]["Change"], rows[0]["Delta"], rows[0]["Name"]) == ("added", "+4", "Brainstorm")
+
+
+def test_folder_in_by_is_honoured():
+    old = [E("Sol Ring", 1, set_code="C21", collector_number="263", folder="x")]
+    new = [E("Sol Ring", 1, set_code="C21", collector_number="263", folder="y")]
+    d = delta.diff(old, new, delta.BY_PRINTING + ("folder",))
+    assert d.summary()["added"] == 1 and d.summary()["removed"] == 1
+    assert [e.folder for e in d.apply(old)] == ["y"]

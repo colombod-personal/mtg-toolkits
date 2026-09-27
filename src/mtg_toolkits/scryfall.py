@@ -136,7 +136,10 @@ class ScryfallClient(BaseClient):
 
     @staticmethod
     def _json(resp) -> dict[str, Any]:
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError:  # e.g. an HTML 502 page from a proxy
+            raise ApiError(resp.status_code, resp.text[:200] or "invalid JSON response") from None
         if resp.status_code >= 400 or data.get("object") == "error":
             raise ApiError(resp.status_code, data.get("details", resp.text), data)
         return data

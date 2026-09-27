@@ -211,6 +211,7 @@ def diff(
 ) -> CollectionDiff:
     """Compare two snapshots. Lines are sorted by status, then key."""
     fields = _fields(by, folders)
+    folders = "folder" in fields  # via folders=True or listed in `by`
     by_only = tuple(f for f in fields if f != "folder")
     before = aggregate(old, by_only, folders=folders)
     after = aggregate(new, by_only, folders=folders)

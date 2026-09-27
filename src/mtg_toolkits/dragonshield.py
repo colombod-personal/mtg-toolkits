@@ -118,6 +118,12 @@ def _float(value: str | None) -> float | None:
         return None
 
 
+def _quantity(value: str | None) -> int:
+    """Missing or blank means 1; an explicit 0 stays 0."""
+    q = _float(value)
+    return 1 if q is None else int(q)
+
+
 def _date(value: str | None) -> date | None:
     if not value or not value.strip():
         return None
@@ -172,7 +178,7 @@ def parse(text: str) -> list[CollectionEntry]:
         entries.append(
             CollectionEntry(
                 name=name,
-                quantity=int(_float(col(row, "Quantity")) or 1),
+                quantity=_quantity(col(row, "Quantity")),
                 trade_quantity=int(_float(col(row, "Trade Quantity")) or 0),
                 set_code=set_code,
                 set_name=(col(row, "Set Name") or None),

@@ -74,3 +74,13 @@ def test_coverage_report():
         "Sol Ring": ("owned", 3, 0),
         "Rhystic Study": ("missing", 0, 2),
     }
+
+
+def test_bracket_category_is_not_a_set_code():
+    deck = parse_text("1x Duress [Sideboard]\n1 Lightning Bolt [Removal]\n1 Sol Ring [CMR]\n1x Sol Ring (c21) 263 [Ramp]")
+    duress, bolt, sol_cmr, sol_c21 = deck.lines
+    assert (duress.set_code, duress.section) == (None, "sideboard")
+    assert (bolt.set_code, bolt.categories) == (None, ["Removal"])
+    assert sol_cmr.set_code == "cmr"
+    assert (sol_c21.name, sol_c21.set_code, sol_c21.collector_number, sol_c21.categories) == ("Sol Ring", "c21", "263", ["Ramp"])
+    assert deck.card_count == 3  # the sideboard card doesn't count

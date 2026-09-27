@@ -51,17 +51,20 @@ hosts directly). "Unverified" means reported by third parties only.
 
 * There is no public API, no developer docs, and no third-party "sign in with Dragon Shield" (OAuth) access. Data leaves the app as a CSV export (whole collection or per folder), and the card manager also imports CSV.
 * Collections live server-side (cloud sync, friends can view collections). The web app is at `mtg.dragonshield.com` and the account/login site at `auth.dragonshield.com`, so an internal API exists behind the web app. Automating it would mean reusing a user's logged-in session token against undocumented endpoints. That's brittle, and possibly against their T&C (the licence is "limited … for the purpose of accessing them"). **Next step if wanted:** capture a HAR of the web app loading folders (with credentials stripped) to map those endpoints, and/or ask Dragon Shield about partner access.
-* The observed layout starts with an Excel `sep=,` line:
-  `Folder Name, Quantity, Trade Quantity, Card Name, Set Code, Set Name, Card Number, Condition, Printing, Language, Price Bought, Date Bought, LOW, MID, MARKET`
-* Values:
-  * Condition: `Mint, NearMint, Excellent, Good, LightPlayed, Played, Poor`
-  * Printing: `Normal, Foil` (there is no etched value)
-  * Language: full English names such as `Japanese` or `Simplified Chinese`
-  * Dates: `yyyy-MM-dd` or `M/d/yyyy`
+* **Verified against a real export** (14,597 rows / 21,950 copies / 269 sets, September 2026):
+  * The file is UTF-8 with CRLF line endings, and the first line is a *quoted* `"sep=,"`. Fields containing a comma or an **apostrophe** are quoted (`"Commander Legends: Battle for Baldur's Gate"`).
+  * Header: `Folder Name, Quantity, Trade Quantity, Card Name, Set Code, Set Name, Card Number, Condition, Printing, Language, Price Bought, Date Bought, LOW, MID, MARKET`
+  * Condition: `Mint, NearMint, Excellent, Good, LightPlayed` were seen (`Played, Poor` exist too).
+  * Printing: `Normal`, `Foil`, plus named foil treatments (`Oilslick Foil`, `Step and Compleat Foil`, `Surge Foil`, `Ripple Foil`, `Silver Foil`). It is **blank** on some etched-only printings (e.g. CLB 5xx–7xx, CMM 600, MH3 5xx).
+  * Language: full English names (`English`, `Italian`, `Japanese`, …).
+  * Dates are `yyyy-MM-dd`, and prices have 2 decimals.
+  * Double-faced cards use the **full `Front // Back` name**. Older third-party notes claiming front-face-only are wrong for current exports.
+  * Set codes are **Scryfall's codes, upper-cased**, including promo sets (`PWOE`, `POTJ`, `P30A`, `PLG21`) and The List's `SET-NUM` collector numbers (`C15-56`). The exceptions found are `GK2_ORZHOV` (Scryfall `gk2`) and `LEGI` ("Legends Italian", Scryfall `leg`). They're handled by `dragonshield.SET_ALIASES`, and the original code is kept for round-trips.
+  * The same printing often appears on many rows (one per purchase date/price). This file has 2,830 such printings, and `delta.aggregate()` sums them.
+  * `dragonshield.read()` + `dragonshield.write()` reproduces this file **byte for byte**.
 * Quirks:
-  * The column layout reportedly varies between users and app versions, so we match headers by name.
-  * Double-faced cards export with the front-face name only.
-  * Some set codes follow TCGplayer rather than Scryfall (promos, lists, token sets). These come back with `card=None` from `enrich()`. The fallback is name-only lookup, or a set-code alias table (TODO).
+  * Column layout reportedly varies between users and app versions, so headers are matched by name.
+  * Unknown set codes or collector numbers fall back to a name+set lookup, then name only, in `ScryfallClient.resolve_entries`. The result's `method` says which step matched.
 * `LOW/MID/MARKET` are Dragon Shield's own USD prices (TCGplayer-derived) at export time.
 * Existing converters for reference: [MtgCsvHelper](https://github.com/StepKie/MtgCsvHelper) (column mappings for about 10 sites), [DragonShield-to-Moxfield](https://github.com/KarmaKamikaze/DragonShield-to-Moxfield).
 
@@ -76,7 +79,7 @@ hosts directly). "Unverified" means reported by third parties only.
 
 - [ ] Local cache (SQLite) of Scryfall bulk data, with a daily price snapshot table for history.
 - [ ] MTGJSON price client (`AllPricesToday`), keyed via `scryfallId`.
-- [ ] Set-code alias table for Dragon Shield → Scryfall mismatches.
+- [x] Set-code alias table for Dragon Shield → Scryfall mismatches (`SET_ALIASES`; extend as more turn up).
 - [ ] Archidekt authenticated client (private decks, collection read/write) once verified against live responses.
 - [ ] More formats: Moxfield, ManaBox, Deckbox CSV (see MtgCsvHelper mappings).
 - [x] "What do I own from this deck?" by diffing an Archidekt deck against a Dragon Shield collection (`delta.shortfall`).

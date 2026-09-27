@@ -63,8 +63,35 @@ def test_collection_batches_and_resolves_entries(cards):
                CollectionEntry("Delver of Secrets"), CollectionEntry("Nope")] * 30
     with make_client(ScryfallClient, handler, slow_interval=0) as sf:
         resolved = sf.resolve_entries(entries)
-    assert batches == [75, 15]
-    assert resolved[0][1].id == "sol-ring-id" and resolved[1][1].id == "delver-id" and resolved[2][1] is None
+    assert batches == [3, 1]  # duplicates sent once; "Nope" retried by name only
+    assert resolved[0].card.id == "sol-ring-id" and resolved[0].method == "set_number"
+    assert resolved[1].card.id == "delver-id" and resolved[1].method == "name"
+    assert resolved[2].card is None and resolved[2].method is None
+
+
+def test_collection_splits_into_batches_of_75():
+    batches = []
+
+    def handler(request):
+        batches.append(len(json.loads(request.content)["identifiers"]))
+        return json_response({"object": "list", "data": [], "not_found": []})
+
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        sf.resolve_entries([CollectionEntry(f"Card {i}") for i in range(100)], fallback=False)
+    assert batches == [75, 25]
+
+
+def test_fallback_to_name_and_set(cards):
+    """A collector number Scryfall doesn't know still resolves by name within the set."""
+    def handler(request):
+        found = [cards["delver"] for i in json.loads(request.content)["identifiers"]
+                 if i.get("name") == "Delver of Secrets" and i.get("set") == "isd"]
+        return json_response({"object": "list", "data": found, "not_found": []})
+
+    entry = CollectionEntry("Delver of Secrets // Insectile Aberration", set_code="ISD", collector_number="51a")
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        [res] = sf.resolve_entries([entry])
+    assert res.card.id == "delver-id" and res.method == "name_set"
 
 
 def test_iter_bulk_file_reads_gzipped_jsonl(tmp_path, cards):
@@ -100,3 +127,18 @@ def test_429_backs_off_then_retries(cards, monkeypatch):
     with make_client(ScryfallClient, lambda r: responses.pop(0), slow_interval=0) as sf:
         assert sf.card("sol-ring-id").name == "Sol Ring"
     assert 30.0 in sleeps
+
+
+def test_enrich_takes_the_only_finish_a_printing_has(cards):
+    from mtg_toolkits.enrich import enrich
+
+    etched = dict(cards["sol"], id="etched-id", collector_number="512", finishes=["etched"],
+                  prices={"usd_etched": "0.55"})
+
+    def handler(request):
+        return json_response({"object": "list", "data": [etched], "not_found": []})
+
+    entry = CollectionEntry("Sol Ring", set_code="C21", collector_number="512")
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        [item] = enrich([entry], sf)
+    assert item.entry.finish is Finish.ETCHED and item.unit_price == 0.55 and item.entry.scryfall_id == "etched-id"

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .models import CollectionEntry
+from .models import CollectionEntry, Finish
 from .scryfall import Card, ScryfallClient
 
 
@@ -15,6 +15,7 @@ from .scryfall import Card, ScryfallClient
 class EnrichedEntry:
     entry: CollectionEntry
     card: Card | None
+    method: str | None = None  # how the card was matched, see ScryfallClient.resolve_entries
 
     @property
     def unit_price(self) -> float | None:
@@ -29,16 +30,22 @@ class EnrichedEntry:
         return None if self.unit_price is None else round(self.unit_price * self.entry.quantity, 2)
 
 
-def enrich(entries: list[CollectionEntry], client: ScryfallClient) -> list[EnrichedEntry]:
-    """Resolve every entry against Scryfall (batched, 75 per request).
+def enrich(entries: list[CollectionEntry], client: ScryfallClient, *, fix_finish: bool = True) -> list[EnrichedEntry]:
+    """Resolve every entry against Scryfall (batched, 75 per request, with fallbacks).
 
-    The Scryfall id is written back onto matched entries.
+    Matched entries get their Scryfall id filled in. With ``fix_finish``, an
+    entry whose finish the printing doesn't come in (e.g. Dragon Shield's blank
+    Printing on an etched-only card) takes the printing's only finish.
     """
     results = []
-    for entry, card in client.resolve_entries(entries):
-        if card and not entry.scryfall_id:
-            entry.scryfall_id = card.id
-        results.append(EnrichedEntry(entry, card))
+    for entry, card, method in client.resolve_entries(entries):
+        if card:
+            if not entry.scryfall_id and method in ("id", "set_number"):
+                entry.scryfall_id = card.id
+            finishes = [Finish(f) for f in card.finishes if f in Finish._value2member_map_]
+            if fix_finish and len(finishes) == 1 and entry.finish not in finishes:
+                entry.finish = finishes[0]
+        results.append(EnrichedEntry(entry, card, method))
     return results
 
 
@@ -48,6 +55,7 @@ def summarize(enriched: Iterable[EnrichedEntry]) -> dict[str, float | int]:
         "entries": len(enriched),
         "cards": sum(e.entry.quantity for e in enriched),
         "unmatched": sum(1 for e in enriched if e.card is None),
+        "matched_by_name_only": sum(1 for e in enriched if e.method == "name"),
         "unpriced": sum(1 for e in enriched if e.card and e.unit_price is None),
         "total_usd": round(sum(e.total_price or 0 for e in enriched), 2),
         "total_eur": round(sum((e.unit_price_eur or 0) * e.entry.quantity for e in enriched), 2),

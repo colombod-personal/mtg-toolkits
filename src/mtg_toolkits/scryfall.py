@@ -21,7 +21,7 @@ import gzip
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, NamedTuple
 
 from .http import ApiError, BaseClient, Throttle
 from .models import CollectionEntry, Finish
@@ -224,31 +224,91 @@ class ScryfallClient(BaseClient):
         return dest
 
     # -- helpers ----------------------------------------------------------------
-    def resolve_entries(self, entries: list[CollectionEntry]) -> list[tuple[CollectionEntry, Card | None]]:
-        """Match collection entries to Scryfall cards (one batched lookup)."""
-        identifiers = [e.scryfall_identifier() for e in entries]
-        cards, _ = self.collection(identifiers)
-        by_id = {c.id: c for c in cards}
-        by_set_num = {(c.set_code, c.collector_number): c for c in cards}
-        by_name_set = {(c.name.lower(), c.set_code): c for c in cards}
-        by_name = {}
-        for c in cards:
-            by_name.setdefault(c.name.lower(), c)
-            for face in c.raw.get("card_faces", []):  # "Delver of Secrets" matches the DFC
-                by_name.setdefault(face.get("name", "").lower(), c)
+    def resolve_entries(self, entries: list[CollectionEntry], *, fallback: bool = True) -> list[Resolution]:
+        """Match collection entries to Scryfall cards using batched lookups.
 
-        results = []
-        for entry, ident in zip(entries, identifiers):
-            if "id" in ident:
-                card = by_id.get(ident["id"])
-            elif "collector_number" in ident:
-                card = by_set_num.get((ident["set"], ident["collector_number"]))
-            elif "set" in ident:
-                card = by_name_set.get((ident["name"].lower(), ident["set"])) or by_name.get(ident["name"].lower())
-            else:
-                card = by_name.get(ident["name"].lower())
-            results.append((entry, card))
-        return results
+        Each distinct identifier is sent once. When ``fallback`` is on, entries
+        that don't resolve are retried by name + set, then by name alone. The
+        ``method`` on each result says which step matched (``"id"``,
+        ``"set_number"``, ``"name_set"``, ``"name"``) or is ``None`` when nothing did.
+        """
+        results: list[Resolution | None] = [None] * len(entries)
+        pending = list(range(len(entries)))
+        steps = [("primary", lambda e: e.scryfall_identifier())]
+        if fallback:
+            steps += [
+                ("name_set", lambda e: {"name": _front(e.name), "set": e.set_code.lower()} if e.set_code else None),
+                ("name", lambda e: {"name": _front(e.name)}),
+            ]
+        for step, make in steps:
+            wanted = {i: make(entries[i]) for i in pending}
+            wanted = {i: ident for i, ident in wanted.items() if ident}
+            unique = list({_ident_key(ident): ident for ident in wanted.values()}.values())
+            if not unique:
+                continue
+            cards, _ = self.collection(unique)
+            index = _CardIndex(cards)
+            still = []
+            for i in pending:
+                ident = wanted.get(i)
+                card = index.find(ident) if ident else None
+                if card is None:
+                    still.append(i)
+                else:
+                    method = step if step != "primary" else _ident_method(ident)
+                    results[i] = Resolution(entries[i], card, method)
+            pending = still
+        for i in pending:
+            results[i] = Resolution(entries[i], None, None)
+        return results  # type: ignore[return-value]
+
+
+class Resolution(NamedTuple):
+    entry: CollectionEntry
+    card: Card | None
+    method: str | None  # "id" | "set_number" | "name_set" | "name" | None
+
+
+def _front(name: str) -> str:
+    return name.split(" // ")[0].strip()
+
+
+def _ident_key(ident: dict[str, str]) -> tuple:
+    return tuple(sorted((k, v.lower()) for k, v in ident.items()))
+
+
+def _ident_method(ident: dict[str, str]) -> str:
+    if "id" in ident:
+        return "id"
+    if "collector_number" in ident:
+        return "set_number"
+    return "name_set" if "set" in ident else "name"
+
+
+class _CardIndex:
+    """Finds the card in a /cards/collection response matching an identifier."""
+
+    def __init__(self, cards: list[Card]):
+        self.by_id = {c.id: c for c in cards}
+        self.by_set_num = {(c.set_code, c.collector_number.lower()): c for c in cards}
+        self.by_name_set: dict[tuple[str, str], Card] = {}
+        self.by_name: dict[str, Card] = {}
+        for c in cards:
+            names = {c.name.lower(), _front(c.name).lower()}
+            names |= {f.get("name", "").lower() for f in c.raw.get("card_faces", [])}
+            for n in names - {""}:
+                self.by_name_set.setdefault((n, c.set_code), c)
+                self.by_name.setdefault(n, c)
+
+    def find(self, ident: dict[str, str]) -> Card | None:
+        if "id" in ident:
+            return self.by_id.get(ident["id"])
+        if "collector_number" in ident:
+            return self.by_set_num.get((ident["set"].lower(), ident["collector_number"].lower()))
+        name = ident["name"].lower()
+        if "set" in ident:
+            return self.by_name_set.get((name, ident["set"].lower()))
+        return self.by_name.get(name)
 
 
 def iter_bulk_file(path: str | Path) -> Iterator[dict[str, Any]]:

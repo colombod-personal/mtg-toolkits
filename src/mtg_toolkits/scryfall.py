@@ -234,13 +234,7 @@ class ScryfallClient(BaseClient):
         """
         results: list[Resolution | None] = [None] * len(entries)
         pending = list(range(len(entries)))
-        steps = [("primary", lambda e: e.scryfall_identifier())]
-        if fallback:
-            steps += [
-                ("name_set", lambda e: {"name": _front(e.name), "set": e.set_code.lower()} if e.set_code else None),
-                ("name", lambda e: {"name": _front(e.name)}),
-            ]
-        for step, make in steps:
+        for step, make in _steps(fallback):
             wanted = {i: make(entries[i]) for i in pending}
             wanted = {i: ident for i, ident in wanted.items() if ident}
             unique = list({_ident_key(ident): ident for ident in wanted.values()}.values())
@@ -261,6 +255,41 @@ class ScryfallClient(BaseClient):
         for i in pending:
             results[i] = Resolution(entries[i], None, None)
         return results  # type: ignore[return-value]
+
+
+def _steps(fallback: bool):
+    steps = [("primary", lambda e: e.scryfall_identifier())]
+    if fallback:
+        steps += [
+            ("name_set", lambda e: {"name": _front(e.name), "set": e.set_code.lower()} if e.set_code else None),
+            ("name", lambda e: {"name": _front(e.name)}),
+        ]
+    return steps
+
+
+def resolve_offline(
+    entries: list[CollectionEntry], cards: Iterable[Card], *, fallback: bool = True
+) -> list["Resolution"]:
+    """Match entries against already-loaded cards (e.g. from a bulk file), no network.
+
+    Same matching and fallback order as :meth:`ScryfallClient.resolve_entries`::
+
+        cards = (Card.from_json(o) for o in iter_bulk_file("default-cards.jsonl.gz"))
+        results = resolve_offline(entries, cards)
+    """
+    index = _CardIndex(list(cards))
+    steps = _steps(fallback)
+    results = []
+    for entry in entries:
+        for step, make in steps:
+            ident = make(entry)
+            card = index.find(ident) if ident else None
+            if card is not None:
+                results.append(Resolution(entry, card, _ident_method(ident) if step == "primary" else step))
+                break
+        else:
+            results.append(Resolution(entry, None, None))
+    return results
 
 
 class Resolution(NamedTuple):

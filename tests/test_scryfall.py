@@ -142,3 +142,17 @@ def test_enrich_takes_the_only_finish_a_printing_has(cards):
     with make_client(ScryfallClient, handler, slow_interval=0) as sf:
         [item] = enrich([entry], sf)
     assert item.entry.finish is Finish.ETCHED and item.unit_price == 0.55 and item.entry.scryfall_id == "etched-id"
+
+
+def test_resolve_offline_matches_like_the_api(cards):
+    from mtg_toolkits.scryfall import resolve_offline
+
+    bulk = [Card.from_json(cards["sol"]), Card.from_json(cards["delver"])]
+    entries = [
+        CollectionEntry("Sol Ring", set_code="C21", collector_number="263"),
+        CollectionEntry("Delver of Secrets // Insectile Aberration", set_code="ISD", collector_number="999"),
+        CollectionEntry("Delver of Secrets", set_code="XXX"),
+        CollectionEntry("Nope"),
+    ]
+    got = [(r.card.id if r.card else None, r.method) for r in resolve_offline(entries, bulk)]
+    assert got == [("sol-ring-id", "set_number"), ("delver-id", "name_set"), ("delver-id", "name"), (None, None)]

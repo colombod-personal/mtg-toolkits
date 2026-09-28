@@ -59,6 +59,9 @@ def test_detect_any_declared_separator():
     assert formats.detect(semicolon) == "dragonshield"
     fmt, entries = formats.parse(semicolon)
     assert fmt == "dragonshield" and (entries[0].name, entries[0].quantity) == ("Sol Ring", 2)
+    # a separator line alone doesn't make a file Dragon Shield: it needs a Card Name column
+    assert formats.detect("sep=;\na;b\n") is None
+    assert formats.detect('"sep=,"\r\nQuantity,Name\r\n1,Sol Ring\r\n') is None
 
 
 def test_generic_csv_keeps_source_prices_and_extras():

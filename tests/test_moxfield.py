@@ -1,0 +1,57 @@
+from datetime import date
+
+import pytest
+
+from mtg_toolkits import dragonshield, moxfield
+from mtg_toolkits.models import CollectionEntry, Condition, Finish
+
+EXPORT = """\
+"Count","Tradelist Count","Name","Edition","Condition","Language","Foil","Tags","Last Modified","Collector Number","Alter","Proxy","Purchase Price"
+"3","1","Sol Ring","c21","Near Mint","English","","Ramp","2024-02-17 10:12:00.000000","263","False","False","1.50"
+"1","0","Delver of Secrets // Insectile Aberration","isd","Lightly Played","Japanese","foil","","2023-01-10 09:00:00.000000","51","False","False",""
+"1","0","Accursed Marauder","mh3","NM","en","etched","","","512","False","False","0,80"
+"""
+
+
+def test_parse_moxfield_export():
+    sol, delver, marauder = moxfield.parse(EXPORT)
+    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 3, 1, "c21", "263")
+    assert (sol.condition, sol.finish, sol.language, sol.purchase_price, sol.folder) == (
+        Condition.NEAR_MINT, Finish.NONFOIL, "en", 1.5, "Ramp")
+    assert sol.purchase_date == date(2024, 2, 17)
+    assert (delver.name, delver.finish, delver.condition, delver.language) == (
+        "Delver of Secrets // Insectile Aberration", Finish.FOIL, Condition.EXCELLENT, "ja")
+    assert (marauder.finish, marauder.condition, marauder.purchase_price) == (Finish.ETCHED, Condition.NEAR_MINT, 0.8)
+    assert sol.scryfall_identifier() == {"set": "c21", "collector_number": "263"}
+
+
+def test_round_trip():
+    entries = moxfield.parse(EXPORT)
+    again = moxfield.parse(moxfield.dumps(entries))
+    key = lambda e: (e.name, e.quantity, e.trade_quantity, e.set_code, e.collector_number, e.finish, e.condition,  # noqa: E731
+                     e.language, e.purchase_price)
+    assert [key(e) for e in again] == [key(e) for e in entries]
+
+
+def test_dragon_shield_to_moxfield(tmp_path):
+    ds = dragonshield.parse('"sep=,"\r\nFolder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,'
+                            'Condition,Printing,Language,Price Bought,Date Bought,LOW,MID,MARKET\r\n'
+                            'Binder,2,0,Sol Ring,C21,Commander 2021,263,Played,Foil,German,2.00,2023-05-01,1,2,3\r\n')
+    out = tmp_path / "moxfield.csv"
+    assert moxfield.write(ds, out) == 1
+    (e,) = moxfield.read(out)
+    assert (e.name, e.quantity, e.set_code, e.finish, e.condition, e.language, e.folder) == (
+        "Sol Ring", 2, "c21", Finish.FOIL, Condition.PLAYED, "de", "Binder")
+
+
+def test_rejects_other_files():
+    with pytest.raises(ValueError, match="Moxfield"):
+        moxfield.parse("a,b\n1,2\n")
+
+
+def test_lenient_values():
+    text = "Count,Name,Edition,Condition,Foil,Language\n2,Lightning Bolt,M11,MP,Foil,French\n1,Island,,,,\n"
+    bolt, island = moxfield.parse(text)
+    assert (bolt.set_code, bolt.condition, bolt.finish, bolt.language) == ("m11", Condition.LIGHT_PLAYED, Finish.FOIL, "fr")
+    assert (island.set_code, island.condition, island.finish, island.language) == (None, Condition.NEAR_MINT, Finish.NONFOIL, "en")
+    assert CollectionEntry(name="x").condition is Condition.NEAR_MINT

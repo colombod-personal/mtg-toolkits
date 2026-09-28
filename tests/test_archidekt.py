@@ -50,3 +50,14 @@ def test_dragonshield_to_archidekt_csv(tmp_path):
     rows = list(csv.DictReader(out.open()))
     assert rows[1]["Finish"] == "Foil" and rows[1]["Language"] == "JP" and rows[1]["Condition"] == "MP"
     assert rows[0]["Edition Code"] == "c21" and rows[0]["Tags"] == "Binder A"
+
+
+def test_multi_category_cards_and_to_entries_default_to_mainboard():
+    deck_json = {**DECK, "cards": DECK["cards"] + [
+        {"quantity": 1, "modifier": "Normal", "categories": ["Ramp", "Maybeboard"], "deletedAt": None,
+         "card": {"uid": "u4", "oracleCard": {"name": "Arcane Signet"}}}]}
+    with make_client(ArchidektClient, lambda r: json_response(deck_json)) as ak:
+        deck = ak.get_deck(42)
+    assert "Arcane Signet" not in [c.name for c in deck.mainboard()]  # maybeboard in any category
+    assert [e.name for e in deck.to_entries()] == ["Kenrith", "Sol Ring"]
+    assert len(deck.to_entries(include_excluded=True)) == 4

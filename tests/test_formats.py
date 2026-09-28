@@ -52,3 +52,23 @@ def test_archidekt_export():
     text = formats.FORMATS["archidekt"].dumps(entries)
     assert text.splitlines()[0].startswith("Quantity,Name,Finish,Condition")
     assert "2,Sol Ring,Foil,NM" in text and entries[0].finish is Finish.FOIL
+
+
+def test_detect_any_declared_separator():
+    semicolon = '"sep=;"\r\nFolder Name;Quantity;Card Name\r\nBinder;2;Sol Ring\r\n'
+    assert formats.detect(semicolon) == "dragonshield"
+    fmt, entries = formats.parse(semicolon)
+    assert fmt == "dragonshield" and (entries[0].name, entries[0].quantity) == ("Sol Ring", 2)
+
+
+def test_generic_csv_keeps_source_prices_and_extras():
+    rows = ("x,1,0,Belfry Spirit,GK2_ORZHOV,Guild Kit,29,Mint,Normal,English,,,1.00,2.00,3.00\r\n"
+            "x,1,0,Accursed Marauder,MH3,Modern Horizons 3,512,Mint,,English,,,,,\r\n"
+            "x,1,0,Lightning Bolt,M11,Magic 2011,149,Mint,Foil Etched,English,,,,,\r\n")
+    ds = DS.split("\r\n", 2)[0] + "\r\n" + DS.split("\r\n", 2)[1] + "\r\n" + rows
+    _, entries = formats.parse(ds)
+    assert entries[0].source_prices and all(e.extra for e in entries)  # aliased set code, blank/named Printing
+    _, back = formats.parse(formats.dumps_generic(entries))
+    assert [(e.source_prices, e.extra) for e in back] == [(e.source_prices, e.extra) for e in entries]
+    # and a Dragon Shield export rebuilt from the generic copy is byte-identical
+    assert formats.FORMATS["dragonshield"].dumps(back) == formats.FORMATS["dragonshield"].dumps(entries)

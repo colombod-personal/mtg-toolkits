@@ -33,7 +33,10 @@ class EnrichedEntry:
 def enrich(entries: list[CollectionEntry], client: ScryfallClient, *, fix_finish: bool = True) -> list[EnrichedEntry]:
     """Resolve every entry against Scryfall (batched, 75 per request, with fallbacks).
 
-    Matched entries get their Scryfall id filled in. With ``fix_finish``, an
+    Entries matched exactly (by id, or by set and collector number) get their Scryfall id filled
+    in. Name-based fallback matches don't: the printing is a guess, and storing its id would lock
+    the guess in for every later export and enrichment pass. They stay re-resolvable, and
+    ``EnrichedEntry.method`` says how each entry matched. With ``fix_finish``, an
     entry whose finish the printing doesn't come in (e.g. Dragon Shield's blank
     Printing on an etched-only card) takes the printing's only finish.
     """

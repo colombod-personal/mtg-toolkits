@@ -95,8 +95,10 @@ class Deck:
         return excluded or set(NON_DECK_CATEGORIES)
 
     def mainboard(self) -> list[DeckCard]:
+        """Cards that count toward the deck: none of their categories is excluded (a card can be
+        in several, e.g. ``["Ramp", "Maybeboard"]`` is a maybeboard card)."""
         excluded = self._excluded()
-        return [c for c in self.cards if not (c.categories and c.categories[0] in excluded)]
+        return [c for c in self.cards if not excluded.intersection(c.categories)]
 
     def to_text(self, include_excluded: bool = False) -> str:
         """Plain ``N Card Name (SET) 123`` list, as accepted by most deck sites."""
@@ -108,7 +110,10 @@ class Deck:
             lines.append(f"{c.quantity} {c.name}{suffix}{foil}")
         return "\n".join(lines)
 
-    def to_entries(self) -> list[CollectionEntry]:
+    def to_entries(self, include_excluded: bool = False) -> list[CollectionEntry]:
+        """The deck as collection entries, mainboard only unless ``include_excluded`` (Maybeboard,
+        Sideboard and other excluded categories), matching :meth:`to_text`."""
+        cards = self.cards if include_excluded else self.mainboard()
         return [
             CollectionEntry(
                 name=c.name,
@@ -120,7 +125,7 @@ class Deck:
                 scryfall_id=c.scryfall_id,
                 folder=self.name,
             )
-            for c in self.cards
+            for c in cards
         ]
 
 

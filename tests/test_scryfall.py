@@ -167,3 +167,15 @@ def test_non_json_error_raises_api_error():
         with pytest.raises(ApiError) as exc:
             sf.card("x")
     assert exc.value.status_code == 404
+
+
+def test_search_with_zero_limit_makes_no_request(cards):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return json_response({"object": "list", "has_more": False, "data": [cards["sol"]]})
+
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        assert list(sf.search("x", limit=0)) == [] and calls == []
+        assert len(list(sf.search("x", limit=1))) == 1

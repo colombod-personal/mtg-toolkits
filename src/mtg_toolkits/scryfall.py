@@ -165,6 +165,8 @@ class ScryfallClient(BaseClient):
 
         Transparently follows pagination. A query with no matches yields nothing.
         """
+        if limit is not None and limit <= 0:
+            return
         params: dict[str, Any] | None = {"q": query, "unique": unique, "order": order}
         url = "/cards/search"
         count = 0

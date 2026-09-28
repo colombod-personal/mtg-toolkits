@@ -108,3 +108,11 @@ credit them in your app too.
 mtg-toolkits is unofficial Fan Content permitted under the
 [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy). Not approved/endorsed by Wizards.
 Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
+
+## Licence
+
+MIT (see [LICENSE](LICENSE)). The only runtime dependency is HTTPX, which is BSD-3-Clause. It
+pulls in anyio (MIT), httpcore (BSD-3-Clause), h11 (MIT), idna (BSD-3-Clause) and certifi
+(MPL-2.0, unmodified). There is no copyleft code. Magic: The Gathering names and card text
+belong to Wizards of the Coast. Scryfall, Archidekt, Dragon Shield and Moxfield data and
+formats are used for interoperability, under their own terms (see `docs/research.md`).

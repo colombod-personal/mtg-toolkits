@@ -222,7 +222,11 @@ def _row(values: Iterable[object]) -> str:
 def dumps(entries: Iterable[CollectionEntry], *, sep_line: bool = True) -> str:
     """Serialise entries in the same layout the app exports (quoted sep line, CRLF).
 
-    Reading an export and writing it back reproduces the file byte for byte.
+    Reading an export in the app's own layout (quoted ``"sep=,"`` line, CRLF,
+    the app's columns) and writing it back reproduces the file byte for byte.
+    Other accepted variants (unquoted or other ``sep=`` markers, LF line
+    endings, re-ordered columns) are normalised to that layout: the data
+    survives, the bytes do not.
     """
     buf = io.StringIO()
     if sep_line:

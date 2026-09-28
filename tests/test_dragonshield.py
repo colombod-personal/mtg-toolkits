@@ -62,6 +62,14 @@ def test_real_export_roundtrip_is_lossless():
     assert dragonshield.dumps(dragonshield.parse(REAL_EXPORT)) == REAL_EXPORT
 
 
+def test_variant_layout_is_normalised_without_data_loss():
+    variant = "sep=,\nQuantity,Card Name,Printing\n2,Sol Ring,Foil\n"
+    out = dragonshield.dumps(dragonshield.parse(variant))
+    assert out.startswith('"sep=,"\r\n' + ",".join(dragonshield.COLUMNS) + "\r\n")
+    [e] = dragonshield.parse(out)
+    assert (e.name, e.quantity, e.finish) == ("Sol Ring", 2, Finish.FOIL)
+
+
 def test_quantity_zero_stays_zero():
     [zero, blank] = dragonshield.parse("Card Name,Quantity\nSol Ring,0\nIsland,\n")
     assert (zero.quantity, blank.quantity) == (0, 1)

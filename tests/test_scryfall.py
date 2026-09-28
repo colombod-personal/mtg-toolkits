@@ -63,7 +63,7 @@ def test_collection_batches_and_resolves_entries(cards):
                CollectionEntry("Delver of Secrets"), CollectionEntry("Nope")] * 30
     with make_client(ScryfallClient, handler, slow_interval=0) as sf:
         resolved = sf.resolve_entries(entries)
-    assert batches == [3, 1]  # duplicates sent once; "Nope" retried by name only
+    assert batches == [3]  # duplicates sent once; "Nope" was already looked up by name, so no retry
     assert resolved[0].card.id == "sol-ring-id" and resolved[0].method == "set_number"
     assert resolved[1].card.id == "delver-id" and resolved[1].method == "name"
     assert resolved[2].card is None and resolved[2].method is None
@@ -92,6 +92,21 @@ def test_fallback_to_name_and_set(cards):
     with make_client(ScryfallClient, handler, slow_interval=0) as sf:
         [res] = sf.resolve_entries([entry])
     assert res.card.id == "delver-id" and res.method == "name_set"
+
+
+def test_fallback_never_resends_an_identifier_that_already_missed():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content)["identifiers"])
+        return json_response({"object": "list", "data": [], "not_found": []})
+
+    no_number = CollectionEntry("Nope", set_code="XXX")  # primary is already name + set
+    no_set = CollectionEntry("Nada")  # primary is already the name alone
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        results = sf.resolve_entries([no_number, no_set])
+    assert [r.card for r in results] == [None, None]
+    assert sent == [[{"name": "Nope", "set": "xxx"}, {"name": "Nada"}], [{"name": "Nope"}]]
 
 
 def test_iter_bulk_file_reads_gzipped_jsonl(tmp_path, cards):

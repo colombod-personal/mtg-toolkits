@@ -239,9 +239,13 @@ class ScryfallClient(BaseClient):
         """
         results: list[Resolution | None] = [None] * len(entries)
         pending = list(range(len(entries)))
+        tried: dict[int, set] = {i: set() for i in pending}
         for step, make in _steps(fallback):
             wanted = {i: make(entries[i]) for i in pending}
-            wanted = {i: ident for i, ident in wanted.items() if ident}
+            # A fallback identical to one this entry already tried can't match: don't send it again.
+            wanted = {i: ident for i, ident in wanted.items() if ident and _ident_key(ident) not in tried[i]}
+            for i, ident in wanted.items():
+                tried[i].add(_ident_key(ident))
             unique = list({_ident_key(ident): ident for ident in wanted.values()}.values())
             if not unique:
                 continue

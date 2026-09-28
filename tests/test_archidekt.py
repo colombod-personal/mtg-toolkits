@@ -41,6 +41,18 @@ def test_search_follows_next():
         assert [d["id"] for d in ak.search_decks(ownerUsername="alice")] == [1, 2]
 
 
+def test_search_with_zero_limit_makes_no_request():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return json_response({"results": [{"id": 1}], "next": None})
+
+    with make_client(ArchidektClient, handler) as ak:
+        assert list(ak.search_decks(limit=0)) == [] and calls == []
+        assert [d["id"] for d in ak.search_decks(limit=1)] == [1]
+
+
 def test_dragonshield_to_archidekt_csv(tmp_path):
     from pathlib import Path
 

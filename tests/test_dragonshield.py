@@ -73,3 +73,14 @@ def test_variant_layout_is_normalised_without_data_loss():
 def test_quantity_zero_stays_zero():
     [zero, blank] = dragonshield.parse("Card Name,Quantity\nSol Ring,0\nIsland,\n")
     assert (zero.quantity, blank.quantity) == (0, 1)
+
+
+def test_columns_the_app_does_not_export_are_kept():
+    header = ",".join(dragonshield.COLUMNS)
+    row = "Binder,2,0,Sol Ring,C21,Commander 2021,263,NearMint,Normal,English,,,,,"
+    with_notes = f'"sep=,"\r\n{header},Notes\r\n{row},"signed, by the artist"\r\n'
+    [e] = dragonshield.parse(with_notes)
+    assert e.extra == {"Notes": "signed, by the artist"}
+    assert dragonshield.dumps([e]) == with_notes  # appended columns come back byte for byte
+    plain = dragonshield.parse(f'"sep=,"\r\n{header}\r\n{row}\r\n')
+    assert dragonshield.dumps(plain + [e]).splitlines()[1].endswith(",MARKET,Notes")  # blank for entries without it

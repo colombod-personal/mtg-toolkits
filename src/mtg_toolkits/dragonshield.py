@@ -227,11 +227,19 @@ def dumps(entries: Iterable[CollectionEntry], *, sep_line: bool = True) -> str:
     Other accepted variants (unquoted or other ``sep=`` markers, LF line
     endings, re-ordered columns) are normalised to that layout: the data
     survives, the bytes do not.
+
+    Columns the app doesn't export (kept in ``entry.extra`` when reading, or
+    carried over from another format) are written after the app's columns,
+    in the order first seen, so no data is lost.
     """
+    entries = list(entries)
+    extra_columns = list(dict.fromkeys(
+        k for e in entries for k in e.extra if _norm(k) not in _KNOWN
+    ))
     buf = io.StringIO()
     if sep_line:
         buf.write('"sep=,"\r\n')
-    buf.write(_row(COLUMNS))
+    buf.write(_row(COLUMNS + extra_columns))
     for e in entries:
         buf.write(_row([
             e.folder or "",
@@ -247,6 +255,7 @@ def dumps(entries: Iterable[CollectionEntry], *, sep_line: bool = True) -> str:
             f"{e.purchase_price:.2f}" if e.purchase_price is not None else "",
             e.purchase_date.isoformat() if e.purchase_date else "",
             *[f"{e.source_prices[p.lower()]:.2f}" if p.lower() in e.source_prices else "" for p in PRICE_COLUMNS],
+            *[e.extra.get(k, "") for k in extra_columns],
         ]))
     return buf.getvalue()
 

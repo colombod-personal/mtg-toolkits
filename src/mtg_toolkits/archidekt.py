@@ -145,6 +145,8 @@ class ArchidektClient(BaseClient):
         """Search public decks. Common params: ``name``, ``ownerUsername``,
         ``commanderName``, ``cardName``, ``deckFormat`` (int), ``orderBy``.
         Yields the raw summary dicts."""
+        if limit is not None and limit <= 0:
+            return
         url: str | None = "/decks/v3/"
         query: dict[str, Any] | None = params
         count = 0

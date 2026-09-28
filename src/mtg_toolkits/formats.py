@@ -120,7 +120,7 @@ def detect(text: str) -> str | None:
     declared = first[4:] if first.startswith("sep=") and len(first) == 5 else None  # Excel's "sep=X" line
     header = lines[1] if declared and len(lines) > 1 else lines[0]
     cols = {c.strip().strip('"').lower() for c in next(csv.reader([header], delimiter=declared or ","), [])}
-    if {"card name", "quantity"} <= cols or declared:
+    if {"card name", "quantity"} <= cols or (declared and "card name" in cols):
         return "dragonshield"
     if {"count", "name"} <= cols:
         return "moxfield"

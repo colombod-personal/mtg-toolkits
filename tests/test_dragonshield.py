@@ -13,7 +13,7 @@ def test_parse_export():
     entries = dragonshield.read(FIXTURE)
     assert len(entries) == 3
     sol, delver, bolt = entries
-    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 2, 1, "C21", "263")
+    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 2, 1, "c21", "263")  # normalised; written back as "C21"
     assert sol.purchase_price == 1.5 and sol.purchase_date == date(2023, 5, 1)
     assert sol.source_prices == {"low": 1.2, "mid": 1.6, "market": 1.55}
     assert delver.finish is Finish.FOIL and delver.condition is Condition.LIGHT_PLAYED
@@ -139,3 +139,12 @@ def test_bad_quantity_is_a_value_error(qty):
 def test_oversized_field_is_a_value_error():
     with pytest.raises(ValueError):
         dragonshield.parse('Card Name,Quantity\n"' + "x" * 200_000 + '",1\n')
+
+
+def test_set_codes_are_normalised_and_written_back_as_read():
+    text = '"sep=,"\r\n' + HEADER.rstrip("\n") + "\r\n" + "".join(
+        f"F,1,0,Bolt,{code},M11,149,NearMint,Normal,English,,,,,\r\n" for code in ("M11", "m11", "LEGI"))
+    upper, lower, legends = dragonshield.parse(text)
+    assert [e.set_code for e in (upper, lower, legends)] == ["m11", "m11", "leg"]
+    assert (upper.extra, lower.extra, legends.extra) == ({}, {"Set Code": "m11"}, {"Set Code": "LEGI"})
+    assert dragonshield.dumps([upper, lower, legends]) == text

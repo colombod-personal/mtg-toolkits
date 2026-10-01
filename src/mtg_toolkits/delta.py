@@ -25,8 +25,9 @@ moving cards between folders shows up as a removal plus an addition.
 
 Values are normalised before comparing: names are case-folded and reduced to
 the front face ("Delver of Secrets // Insectile Aberration" matches "Delver of
-Secrets"), set codes are lower-cased, and numeric collector numbers lose
-leading zeros. Rows sharing a key are summed, so split stacks compare correctly.
+Secrets"), set codes and collector numbers are normalised the way the Scryfall
+matcher does it (:mod:`mtg_toolkits.normalize`: lower-cased, Dragon Shield set
+aliases applied, ``*`` read as ``★``, leading zeros dropped). Rows sharing a key are summed, so split stacks compare correctly.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .models import CollectionEntry
+from .normalize import normalize_collector_number, normalize_set_code
 
 BY_CARD: tuple[str, ...] = ("name",)
 BY_PRINTING: tuple[str, ...] = ("name", "set_code", "collector_number", "finish")
@@ -48,13 +50,12 @@ def _name(e: CollectionEntry) -> str:
 
 
 def _number(e: CollectionEntry) -> str:
-    cn = (e.collector_number or "").strip().lower()
-    return str(int(cn)) if cn.isdigit() else cn
+    return normalize_collector_number(e.collector_number) or ""
 
 
 _NORMALISERS: dict[str, Callable[[CollectionEntry], str]] = {
     "name": _name,
-    "set_code": lambda e: (e.set_code or "").strip().lower(),
+    "set_code": lambda e: normalize_set_code(e.set_code) or "",
     "collector_number": _number,
     "finish": lambda e: e.finish.value,
     "condition": lambda e: e.condition.value,

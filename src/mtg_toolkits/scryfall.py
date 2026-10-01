@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import gzip
 import json
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, NamedTuple
 
 from .http import ApiError, BaseClient, Throttle
 from .models import CollectionEntry, Finish
+from .normalize import normalize_collector_number, normalize_set_code
 
 COLLECTION_BATCH_SIZE = 75  # Scryfall's hard maximum per /cards/collection request
 
@@ -150,14 +152,14 @@ class ScryfallClient(BaseClient):
         return Card.from_json(self._get_json(f"/cards/{card_id}"))
 
     def card_by_set_number(self, set_code: str, collector_number: str, lang: str | None = None) -> Card:
-        path = f"/cards/{set_code.lower()}/{collector_number}" + (f"/{lang}" if lang else "")
+        path = f"/cards/{normalize_set_code(set_code)}/{collector_number}" + (f"/{lang}" if lang else "")
         return Card.from_json(self._get_json(path))
 
     def named(self, name: str, *, fuzzy: bool = False, set_code: str | None = None) -> Card:
         """Look a card up by exact (or fuzzy) name."""
         params = {"fuzzy" if fuzzy else "exact": name}
         if set_code:
-            params["set"] = set_code.lower()
+            params["set"] = normalize_set_code(set_code)
         return Card.from_json(self._get_json("/cards/named", slow=True, params=params))
 
     def search(self, query: str, *, unique: str = "cards", order: str = "name", limit: int | None = None) -> Iterator[Card]:
@@ -236,6 +238,8 @@ class ScryfallClient(BaseClient):
         that don't resolve are retried by name + set, then by name alone. The
         ``method`` on each result says which step matched (``"id"``,
         ``"set_number"``, ``"name_set"``, ``"name"``) or is ``None`` when nothing did.
+        Set codes and collector numbers are normalised (:mod:`mtg_toolkits.normalize`),
+        and when several printings match, the one in the entry's language wins, then English.
         """
         results: list[Resolution | None] = [None] * len(entries)
         pending = list(range(len(entries)))
@@ -254,7 +258,7 @@ class ScryfallClient(BaseClient):
             still = []
             for i in pending:
                 ident = wanted.get(i)
-                card = index.find(ident) if ident else None
+                card = index.find(ident, entries[i].language) if ident else None
                 if card is None:
                     still.append(i)
                 else:
@@ -270,7 +274,7 @@ def _steps(fallback: bool):
     steps = [("primary", lambda e: e.scryfall_identifier())]
     if fallback:
         steps += [
-            ("name_set", lambda e: {"name": _front(e.name), "set": e.set_code.lower()} if e.set_code else None),
+            ("name_set", lambda e: {"name": _front(e.name), "set": s} if (s := normalize_set_code(e.set_code)) else None),
             ("name", lambda e: {"name": _front(e.name)}),
         ]
     return steps
@@ -285,6 +289,11 @@ def resolve_offline(
 
         cards = (Card.from_json(o) for o in iter_bulk_file("default-cards.jsonl.gz"))
         results = resolve_offline(entries, cards)
+
+    To hold only the cards that can match, filter the stream first::
+
+        keys = index_keys(entries)
+        cards = (Card.from_json(o) for o in iter_bulk_file(path) if card_matches_keys(o, keys))
     """
     index = _CardIndex(list(cards))
     steps = _steps(fallback)
@@ -292,7 +301,7 @@ def resolve_offline(
     for entry in entries:
         for step, make in steps:
             ident = make(entry)
-            card = index.find(ident) if ident else None
+            card = index.find(ident, entry.language) if ident else None
             if card is not None:
                 results.append(Resolution(entry, card, _ident_method(ident) if step == "primary" else step))
                 break
@@ -323,30 +332,90 @@ def _ident_method(ident: dict[str, str]) -> str:
     return "name_set" if "set" in ident else "name"
 
 
+def _set_number_key(set_code: str | None, number: str | None) -> tuple:
+    return ("set_number", normalize_set_code(set_code) or "", normalize_collector_number(number) or "")
+
+
+def _card_names(raw: dict[str, Any]) -> set[str]:
+    """Lower-cased full name, front face and every face name."""
+    name = raw.get("name") or ""
+    names = {name.lower(), _front(name).lower()} | {(f.get("name") or "").lower() for f in raw.get("card_faces") or []}
+    return names - {""}
+
+
+def _card_keys(raw: dict[str, Any]) -> Iterator[tuple]:
+    yield ("id", raw.get("id"))
+    yield _set_number_key(raw.get("set"), raw.get("collector_number"))
+    for n in _card_names(raw):
+        yield ("name", n)
+
+
+def _ident_key_for_index(ident: dict[str, str]) -> tuple:
+    if "id" in ident:
+        return ("id", ident["id"])
+    if "collector_number" in ident:
+        return _set_number_key(ident["set"], ident["collector_number"])
+    return ("name", ident["name"].lower())
+
+
+def index_keys(entries: Iterable[CollectionEntry], *, fallback: bool = True) -> set[tuple]:
+    """The lookup keys matching ``entries`` can use: ``("id", id)``, ``("set_number", set, number)``
+    and ``("name", lower-case name)``, normalised exactly as matching normalises them.
+
+    Pair with :func:`card_matches_keys` to skip, while streaming a bulk file, every card
+    that :func:`resolve_offline` (with the same ``fallback``) could never pick.
+    """
+    keys = set()
+    for e in entries:
+        for _, make in _steps(fallback):
+            ident = make(e)
+            if ident:
+                keys.add(_ident_key_for_index(ident))
+    return keys
+
+
+def card_matches_keys(card: dict[str, Any] | Card, keys: set[tuple]) -> bool:
+    """Whether a card (raw bulk JSON object or :class:`Card`) has any key in ``keys`` (see :func:`index_keys`)."""
+    raw = card.raw if isinstance(card, Card) else card
+    return any(k in keys for k in _card_keys(raw))
+
+
 class _CardIndex:
-    """Finds the card in a /cards/collection response matching an identifier."""
+    """Finds the card matching an identifier among loaded cards (an API response or a bulk file).
+
+    When several printings share a key (e.g. every language of a card in a bulk
+    file), the one in the requested language wins, then English, then the first seen.
+    """
 
     def __init__(self, cards: list[Card]):
         self.by_id = {c.id: c for c in cards}
-        self.by_set_num = {(c.set_code, c.collector_number.lower()): c for c in cards}
-        self.by_name_set: dict[tuple[str, str], Card] = {}
-        self.by_name: dict[str, Card] = {}
+        self.by_set_num: dict[tuple, list[Card]] = defaultdict(list)
+        self.by_name_set: dict[tuple[str, str], list[Card]] = defaultdict(list)
+        self.by_name: dict[str, list[Card]] = defaultdict(list)
         for c in cards:
-            names = {c.name.lower(), _front(c.name).lower()}
-            names |= {f.get("name", "").lower() for f in c.raw.get("card_faces", [])}
-            for n in names - {""}:
-                self.by_name_set.setdefault((n, c.set_code), c)
-                self.by_name.setdefault(n, c)
+            self.by_set_num[_set_number_key(c.set_code, c.collector_number)].append(c)
+            for n in _card_names(c.raw):
+                self.by_name_set[(n, normalize_set_code(c.set_code) or "")].append(c)
+                self.by_name[n].append(c)
 
-    def find(self, ident: dict[str, str]) -> Card | None:
+    def find(self, ident: dict[str, str], lang: str | None = "en") -> Card | None:
         if "id" in ident:
             return self.by_id.get(ident["id"])
         if "collector_number" in ident:
-            return self.by_set_num.get((ident["set"].lower(), ident["collector_number"].lower()))
-        name = ident["name"].lower()
-        if "set" in ident:
-            return self.by_name_set.get((name, ident["set"].lower()))
-        return self.by_name.get(name)
+            found = self.by_set_num.get(_set_number_key(ident["set"], ident["collector_number"]))
+        elif "set" in ident:
+            found = self.by_name_set.get((ident["name"].lower(), normalize_set_code(ident["set"]) or ""))
+        else:
+            found = self.by_name.get(ident["name"].lower())
+        return _prefer_language(found or [], lang or "en")
+
+
+def _prefer_language(cards: list[Card], lang: str) -> Card | None:
+    for wanted in (lang, "en"):
+        for c in cards:
+            if c.lang == wanted:
+                return c
+    return cards[0] if cards else None
 
 
 def iter_bulk_file(path: str | Path) -> Iterator[dict[str, Any]]:

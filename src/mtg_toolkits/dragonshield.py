@@ -25,8 +25,10 @@ Quirks handled here:
 * Prices may use either decimal separator (see :func:`mtg_toolkits.normalize.parse_number`).
 * Double-faced cards use the full ``"Front // Back"`` name.
 * Set codes are mostly Scryfall's (including promo sets like ``PWOE`` and The
-  List numbers like ``C15-56``). A few Dragon Shield-only codes are mapped via
-  :data:`SET_ALIASES`; the original is kept in ``entry.extra["Set Code"]``.
+  List numbers like ``C15-56``). Codes are lower-cased and the few Dragon
+  Shield-only ones mapped (:func:`mtg_toolkits.normalize.normalize_set_code`);
+  an original that isn't just the upper-cased result is kept in
+  ``entry.extra["Set Code"]`` so writing the file back is lossless.
 * The same printing often appears on several rows (one per purchase), so use
   :func:`mtg_toolkits.delta.aggregate` to get totals.
 * ``LOW``/``MID``/``MARKET`` are Dragon Shield's own (TCGplayer-derived) USD prices.
@@ -42,7 +44,8 @@ from pathlib import Path
 from typing import Iterable
 
 from .models import CollectionEntry, Condition, Finish
-from .normalize import csv_errors_as_value_errors, parse_number, parse_quantity
+from .normalize import SET_ALIASES  # noqa: F401  (Dragon Shield code -> Scryfall code; lives in .normalize now)
+from .normalize import csv_errors_as_value_errors, normalize_set_code, parse_number, parse_quantity
 
 COLUMNS = [
     "Folder Name", "Quantity", "Trade Quantity", "Card Name", "Set Code", "Set Name",
@@ -78,28 +81,12 @@ LANGUAGE_NAMES = {
     "zhs": "Simplified Chinese", "zht": "Traditional Chinese",
     "ph": "Phyrexian", "he": "Hebrew", "la": "Latin", "ar": "Arabic", "sa": "Sanskrit", "grc": "Ancient Greek",
 }
-
-
-# Dragon Shield set code (lower-case) -> Scryfall set code.
-SET_ALIASES = {
-    "gk1_boros": "gk1", "gk1_dimir": "gk1", "gk1_golgari": "gk1", "gk1_izzet": "gk1", "gk1_selesn": "gk1",
-    "gk1_selesnya": "gk1",
-    "gk2_azorius": "gk2", "gk2_gruul": "gk2", "gk2_orzhov": "gk2", "gk2_rakdos": "gk2", "gk2_simic": "gk2",
-    "legi": "leg",  # "Legends Italian"
-}
 PLAIN_PRINTINGS = {"normal", "foil"}
 
 
 def scryfall_set_code(code: str | None) -> str | None:
-    """Translate a Dragon Shield set code to Scryfall's (unknown codes pass through)."""
-    if not code:
-        return None
-    lowered = code.strip().lower()
-    if lowered in SET_ALIASES:
-        return SET_ALIASES[lowered]
-    if lowered.startswith(("gk1_", "gk2_")):
-        return lowered[:3]
-    return code
+    """Translate a Dragon Shield set code to Scryfall's, lower-cased (see :func:`normalize_set_code`)."""
+    return normalize_set_code(code)
 
 
 def _finish(printing: str) -> Finish:
@@ -170,7 +157,7 @@ def parse(text: str) -> list[CollectionEntry]:
         extra = {h: row[i] for i, h in enumerate(header) if _norm(h) not in _KNOWN and i < len(row)}
         if printing.lower() not in PLAIN_PRINTINGS:
             extra["Printing"] = printing
-        if raw_set and set_code != raw_set:
+        if raw_set and set_code.upper() != raw_set:  # dumps() writes the code upper-cased
             extra["Set Code"] = raw_set
         condition, language = col(row, "Condition") or "", col(row, "Language") or ""
         if condition and _norm(condition) not in CONDITIONS:

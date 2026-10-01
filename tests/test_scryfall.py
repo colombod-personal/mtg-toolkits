@@ -194,3 +194,70 @@ def test_search_with_zero_limit_makes_no_request(cards):
     with make_client(ScryfallClient, handler, slow_interval=0) as sf:
         assert list(sf.search("x", limit=0)) == [] and calls == []
         assert len(list(sf.search("x", limit=1))) == 1
+
+
+def _printing(set_code, number, name="X", lang="en"):
+    return Card.from_json({"id": f"{set_code}-{number}-{lang}", "name": name, "set": set_code,
+                           "collector_number": number, "lang": lang})
+
+
+def test_offline_matching_normalises_set_codes_and_numbers():
+    from mtg_toolkits.scryfall import resolve_offline
+
+    bulk = [_printing("gk2", "7", "Orzhov Signet"), _printing("neo", "7"), _printing("neo", "123a"),
+            _printing("neo", "1★"), _printing("plst", "C15-56")]
+    entries = [CollectionEntry("Orzhov Signet", set_code="GK2_ORZHOV", collector_number="7"),
+               CollectionEntry("X", set_code="NEO", collector_number="007"),
+               CollectionEntry("X", set_code=" Neo ", collector_number="123A"),
+               CollectionEntry("X", set_code="neo", collector_number="1*"),
+               CollectionEntry("X", set_code="PLST", collector_number="c15-56")]
+    got = [(r.card.id if r.card else None, r.method) for r in resolve_offline(entries, bulk, fallback=False)]
+    assert got == [("gk2-7-en", "set_number"), ("neo-7-en", "set_number"), ("neo-123a-en", "set_number"),
+                   ("neo-1★-en", "set_number"), ("plst-C15-56-en", "set_number")]
+    [res] = resolve_offline([CollectionEntry("Orzhov Signet", set_code="GK2_ORZHOV")], bulk)
+    assert res.method == "name_set" and res.card.id == "gk2-7-en"
+
+
+def test_online_matching_translates_dragon_shield_set_codes():
+    sent = []
+
+    def handler(request):
+        ids = json.loads(request.content)["identifiers"]
+        sent.append(ids)
+        found = [{"id": "signet", "name": "Orzhov Signet", "set": "gk2", "collector_number": "7"}
+                 for i in ids if i == {"set": "gk2", "collector_number": "7"}]
+        return json_response({"object": "list", "data": found, "not_found": []})
+
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        [res] = sf.resolve_entries([CollectionEntry("Orzhov Signet", set_code="GK2_ORZHOV", collector_number="7")])
+    assert (res.card.id, res.method) == ("signet", "set_number") and sent == [[{"set": "gk2", "collector_number": "7"}]]
+
+
+def test_matching_prefers_the_entry_language_then_english():
+    from mtg_toolkits.scryfall import resolve_offline
+
+    bulk = [_printing("neo", "1", "Bolt", "ja"), _printing("neo", "1", "Bolt", "en"), _printing("neo", "1", "Bolt", "de")]
+    for fallback_only in (False, True):
+        entries = [CollectionEntry("Bolt", set_code="neo", collector_number=None if fallback_only else "1", language=lang)
+                   for lang in ("en", "de", "fr")]
+        assert [r.card.lang for r in resolve_offline(entries, bulk)] == ["en", "de", "en"]
+        assert [r.card.lang for r in resolve_offline([CollectionEntry("Bolt", language="ja")], bulk)] == ["ja"]
+    assert resolve_offline([CollectionEntry("Bolt", language="fr")], bulk[:1])[0].card.lang == "ja"  # only one
+
+
+def test_index_keys_prefilter_a_bulk_stream(cards):
+    from mtg_toolkits.scryfall import card_matches_keys, index_keys, resolve_offline
+
+    entries = [CollectionEntry("Orzhov Signet", set_code="GK2_ORZHOV", collector_number="007"),
+               CollectionEntry("Insectile Aberration"), CollectionEntry("Anything", scryfall_id="sol-ring-id")]
+    keys = index_keys(entries)
+    bulk = [{"id": "signet", "name": "Orzhov Signet", "set": "gk2", "collector_number": "7"},
+            {"id": "other-signet", "name": "Orzhov Signet", "set": "rav", "collector_number": "1"},  # name fallback
+            cards["delver"], cards["sol"], {"id": "bolt", "name": "Lightning Bolt", "set": "m11", "collector_number": "149"}]
+    kept = [c for c in bulk if card_matches_keys(c, keys)]
+    assert [c["id"] for c in kept] == ["signet", "other-signet", "delver-id", "sol-ring-id"]
+    assert card_matches_keys(Card.from_json(cards["sol"]), keys)
+    full = resolve_offline(entries, [Card.from_json(c) for c in bulk])
+    assert [(r.card.id, r.method) for r in resolve_offline(entries, [Card.from_json(c) for c in kept])] == [
+        (r.card.id, r.method) for r in full]
+    assert index_keys(entries, fallback=False) < keys

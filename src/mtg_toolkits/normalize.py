@@ -1,5 +1,19 @@
 """Shared value normalisation for the readers, the matchers and callers.
 
+Set codes (:func:`normalize_set_code`) are stripped, lower-cased and mapped
+from the few Dragon Shield-only codes to Scryfall's:
+
+* exact aliases, listed by :func:`set_alias_map` (``"legi"`` -> ``"leg"``), then
+* the prefix rule: a code starting with one of :data:`SET_ALIAS_PREFIXES`
+  (``gk1_``/``gk2_``, the guild kits) becomes its first three characters
+  (``"GK2_ORZHOV"`` -> ``"gk2"``).
+
+A front end that can't call Python can ship ``set_alias_map()`` and
+``SET_ALIAS_PREFIXES`` as JSON and apply the same two steps.
+
+Collector numbers (:func:`normalize_collector_number`) are compared stripped,
+lower-cased, with ``*`` read as ``★`` and leading zeros dropped (``"007a"`` -> ``"7a"``).
+
 Numbers (:func:`parse_number`) are read leniently, because collection files
 come from apps in many locales:
 
@@ -21,6 +35,15 @@ import functools
 import math
 import re
 
+# Dragon Shield set code (lower-case) -> Scryfall set code.
+SET_ALIASES = {
+    "gk1_boros": "gk1", "gk1_dimir": "gk1", "gk1_golgari": "gk1", "gk1_izzet": "gk1", "gk1_selesn": "gk1",
+    "gk1_selesnya": "gk1",
+    "gk2_azorius": "gk2", "gk2_gruul": "gk2", "gk2_orzhov": "gk2", "gk2_rakdos": "gk2", "gk2_simic": "gk2",
+    "legi": "leg",  # "Legends Italian"
+}
+SET_ALIAS_PREFIXES = ("gk1_", "gk2_")  # any other code with these prefixes maps to its first 3 characters
+
 MAX_QUANTITY = 1_000_000  # copies on one line; anything above is a broken file
 
 _CURRENCY = str.maketrans("", "", "$€£  ")
@@ -29,6 +52,34 @@ _PLAIN = re.compile(r"-?(?:\d+\.?\d*|\.\d+)")
 
 def _plain(text: str, thousands: str, decimal: str) -> str:
     return text.replace(thousands, "").replace(decimal, ".")
+
+
+def set_alias_map() -> dict[str, str]:
+    """The exact set code aliases (lower-case source code -> Scryfall code), as a copy.
+
+    Also apply the :data:`SET_ALIAS_PREFIXES` rule, or just call :func:`normalize_set_code`.
+    """
+    return dict(SET_ALIASES)
+
+
+def normalize_set_code(code: str | None) -> str | None:
+    """Scryfall's code for ``code``: stripped, lower-cased, aliases applied. None if blank."""
+    lowered = (code or "").strip().lower()
+    if lowered in SET_ALIASES:
+        return SET_ALIASES[lowered]
+    if lowered.startswith(SET_ALIAS_PREFIXES):
+        return lowered[:3]
+    return lowered or None
+
+
+def _clean_number(number: str | None) -> str:
+    """Stripped, ``*`` as ``★``, no leading zeros; case kept (what Scryfall's API is sent)."""
+    return re.sub(r"^0+(?=\d)", "", (number or "").strip().replace("*", "★"))
+
+
+def normalize_collector_number(number: str | None) -> str | None:
+    """The form collector numbers are matched in: ``" 007A "`` -> ``"7a"``, ``"1*"`` -> ``"1★"``. None if blank."""
+    return _clean_number(number).lower() or None
 
 
 def parse_number(value: str | None) -> float | None:

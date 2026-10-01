@@ -92,3 +92,8 @@ def test_folder_in_by_is_honoured():
     d = delta.diff(old, new, delta.BY_PRINTING + ("folder",))
     assert d.summary()["added"] == 1 and d.summary()["removed"] == 1
     assert [e.folder for e in d.apply(old)] == ["y"]
+
+
+def test_collector_numbers_match_like_the_card_index():
+    assert delta.key_of(E("x", set_code="neo", collector_number="1*")) == delta.key_of(E("x", set_code="neo", collector_number="1★"))
+    assert delta.key_of(E("x", set_code="neo", collector_number="007a")) == delta.key_of(E("x", set_code="neo", collector_number="7A"))

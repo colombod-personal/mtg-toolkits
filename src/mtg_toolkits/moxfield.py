@@ -28,7 +28,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
-from .dragonshield import LANGUAGE_NAMES, LANGUAGES
+from .dragonshield import LANGUAGE_NAMES, LANGUAGES, _as_read
 from .models import CollectionEntry, Condition, Finish
 from .normalize import csv_errors_as_value_errors, normalize_set_code, parse_number, parse_quantity
 
@@ -118,7 +118,7 @@ def dumps(entries: Iterable[CollectionEntry]) -> str:
     for e in entries:
         tags = e.extra.get("Tags") or e.folder or ""
         writer.writerow([
-            e.quantity, e.trade_quantity or 0, e.name, e.extra.get("Edition") or (e.set_code or "").lower(), CONDITION_NAMES[e.condition],
+            e.quantity, e.trade_quantity or 0, e.name, _as_read(e.extra.get("Edition"), e.set_code) or (e.set_code or "").lower(), CONDITION_NAMES[e.condition],
             LANGUAGE_NAMES.get(e.language, e.language), FINISH_NAMES[e.finish], tags,
             e.extra.get("Last Modified") or (e.purchase_date.isoformat() if e.purchase_date else ""),
             e.collector_number or "", e.extra.get("Alter", "False"), e.extra.get("Proxy", "False"),

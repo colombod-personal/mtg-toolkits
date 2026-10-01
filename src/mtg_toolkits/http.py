@@ -37,7 +37,9 @@ def retry_after_seconds(value: str | None, now: datetime | None = None) -> float
         except (TypeError, ValueError, IndexError):
             return None
         when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
-        seconds = (when - (now or datetime.now(timezone.utc))).total_seconds()
+        now = now or datetime.now(timezone.utc)
+        now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        seconds = (when - now).total_seconds()
     return max(0.0, seconds) if math.isfinite(seconds) else None
 
 

@@ -149,3 +149,17 @@ def test_set_codes_are_normalised_and_written_back_as_read():
     assert [e.set_code for e in (upper, lower, legends)] == ["m11", "m11", "leg"]
     assert (upper.extra, lower.extra, legends.extra) == ({}, {"Set Code": "m11"}, {"Set Code": "LEGI"})
     assert dragonshield.dumps([upper, lower, legends]) == text
+
+
+def test_an_edited_set_code_wins_over_the_one_read_from_the_file():
+    from mtg_toolkits import dragonshield, moxfield
+
+    ds = dragonshield.parse('"sep=,"\nFolder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,'
+                            'Condition,Printing,Language,Price Bought,Date Bought,LOW,MID,MARKET\n'
+                            'Box,1,0,Belfry Spirit,GK2_ORZHOV,Guild Kit,29,NearMint,Normal,English,0.1,2024-01-01,0,0,0\n')
+    assert "GK2_ORZHOV" in dragonshield.dumps(ds)  # unchanged: written back as read
+    ds[0].set_code = "neo"
+    assert "GK2_ORZHOV" not in dragonshield.dumps(ds) and ",NEO," in dragonshield.dumps(ds)
+    mx = moxfield.parse("Count,Name,Edition,Collector Number\n1,Belfry Spirit,GK2_ORZHOV,29\n")
+    mx[0].set_code = "neo"
+    assert "gk2_orzhov" not in moxfield.dumps(mx).lower() and ",neo," in moxfield.dumps(mx)

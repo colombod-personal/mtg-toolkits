@@ -23,10 +23,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator, NamedTuple
+from urllib.parse import quote
 
 from .http import ApiError, BaseClient, Throttle
 from .models import CollectionEntry, Finish
-from .normalize import normalize_collector_number, normalize_set_code
+from .normalize import _clean_number, normalize_collector_number, normalize_set_code
 
 COLLECTION_BATCH_SIZE = 75  # Scryfall's hard maximum per /cards/collection request
 
@@ -152,7 +153,8 @@ class ScryfallClient(BaseClient):
         return Card.from_json(self._get_json(f"/cards/{card_id}"))
 
     def card_by_set_number(self, set_code: str, collector_number: str, lang: str | None = None) -> Card:
-        path = f"/cards/{normalize_set_code(set_code)}/{collector_number}" + (f"/{lang}" if lang else "")
+        number = quote(_clean_number(collector_number), safe="")  # as the matchers read it: "007" -> "7", "1*" -> "1★"
+        path = f"/cards/{normalize_set_code(set_code)}/{number}" + (f"/{lang}" if lang else "")
         return Card.from_json(self._get_json(path))
 
     def named(self, name: str, *, fuzzy: bool = False, set_code: str | None = None) -> Card:

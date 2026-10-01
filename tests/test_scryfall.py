@@ -261,3 +261,16 @@ def test_index_keys_prefilter_a_bulk_stream(cards):
     assert [(r.card.id, r.method) for r in resolve_offline(entries, [Card.from_json(c) for c in kept])] == [
         (r.card.id, r.method) for r in full]
     assert index_keys(entries, fallback=False) < keys
+
+
+def test_card_by_set_number_sends_the_number_as_matching_reads_it(cards):
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.raw_path.decode())
+        return json_response(cards["sol"])
+
+    with make_client(ScryfallClient, handler, slow_interval=0) as sf:
+        sf.card_by_set_number("GK2_ORZHOV", "007")
+        sf.card_by_set_number("c21", "1*")
+    assert paths == ["/cards/gk2/7", "/cards/c21/1%E2%98%85"]

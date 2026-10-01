@@ -89,10 +89,16 @@ def _json_object(row: dict[str, str], column: str) -> dict:
 
 
 def _source_prices(row: dict[str, str]) -> dict[str, float]:
-    prices = _json_object(row, "source_prices")
-    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in prices.values()):
-        raise ValueError(f"source_prices values must be numbers: {row['source_prices'][:40]!r}")
-    return {k: float(v) for k, v in prices.items()}
+    prices, out = _json_object(row, "source_prices"), {}
+    for k, v in prices.items():
+        try:  # a JSON integer can be too large for a float
+            number = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else math.nan
+        except OverflowError:
+            number = math.nan
+        if not math.isfinite(number):
+            raise ValueError(f"source_prices values must be numbers: {row['source_prices'][:40]!r}")
+        out[k] = number
+    return out
 
 
 @csv_errors_as_value_errors

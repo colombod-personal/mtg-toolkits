@@ -252,7 +252,7 @@ def dumps(entries: Iterable[CollectionEntry], *, sep_line: bool = True) -> str:
             e.quantity,
             e.trade_quantity,
             e.name,
-            e.extra.get("Set Code") or (e.set_code or "").upper(),
+            _as_read(e.extra.get("Set Code"), e.set_code) or (e.set_code or "").upper(),
             e.set_name or "",
             e.collector_number or "",
             _condition(e),
@@ -269,3 +269,9 @@ def dumps(entries: Iterable[CollectionEntry], *, sep_line: bool = True) -> str:
 def write(entries: Iterable[CollectionEntry], path: str | Path, **kwargs) -> None:
     with Path(path).open("w", encoding="utf-8", newline="") as fh:  # keep CRLF as written
         fh.write(dumps(entries, **kwargs))
+
+
+def _as_read(raw: str | None, set_code: str | None) -> str | None:
+    """The set code as the file had it, if the entry's set wasn't changed since (an edited
+    ``set_code`` wins over the stored original)."""
+    return raw if raw and normalize_set_code(raw) == normalize_set_code(set_code) else None

@@ -67,3 +67,11 @@ def test_package_exports():
 
     for name in ("normalize_set_code", "normalize_collector_number", "set_alias_map", "parse_number", "parse_quantity"):
         assert getattr(mtg_toolkits, name) is not None and name in mtg_toolkits.__all__
+
+
+def test_retry_after_dates_accept_a_naive_now():
+    from datetime import datetime
+
+    from mtg_toolkits.http import retry_after_seconds
+
+    assert retry_after_seconds("Wed, 21 Oct 2015 07:28:10 GMT", now=datetime(2015, 10, 21, 7, 28, 0)) == 10.0

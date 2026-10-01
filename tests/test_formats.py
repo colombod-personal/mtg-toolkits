@@ -123,3 +123,16 @@ def test_detect_tab_separator_line():
 def test_oversized_header_is_unrecognised():
     with pytest.raises(ValueError, match="Unrecognised"):
         formats.parse('"' + "x" * 200_000 + '",Card Name\n')
+
+
+def test_a_huge_source_price_is_a_value_error():
+    import pytest
+    from mtg_toolkits import formats
+
+    text = ",".join(formats.GENERIC_COLUMNS) + "\n"
+    row = {c: "" for c in formats.GENERIC_COLUMNS} | {"quantity": "1", "name": "Sol Ring", "finish": "nonfoil",
+                                                      "condition": "near_mint", "source_prices": '{"usd": 1' + "0" * 400 + "}"}
+    import csv, io
+    out = io.StringIO(); csv.writer(out).writerow([row[c] for c in formats.GENERIC_COLUMNS])
+    with pytest.raises(ValueError):
+        formats.parse_generic(text + out.getvalue())

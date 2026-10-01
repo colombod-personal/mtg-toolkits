@@ -89,5 +89,5 @@ def test_bracket_category_is_not_a_set_code():
 def test_absurd_quantities_are_unparsed():
     huge = "9" * 5000 + " Sol Ring"
     deck = parse_text(f"{huge}\n2000000 Island\n1000000 Swamp\n1 Sol Ring\n")
-    assert [(l.quantity, l.name) for l in deck.lines] == [(1_000_000, "Swamp"), (1, "Sol Ring")]
+    assert [(line.quantity, line.name) for line in deck.lines] == [(1_000_000, "Swamp"), (1, "Sol Ring")]
     assert deck.unparsed == [huge, "2000000 Island"]

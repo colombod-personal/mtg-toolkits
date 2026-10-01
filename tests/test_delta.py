@@ -95,8 +95,10 @@ def test_folder_in_by_is_honoured():
 
 
 def test_collector_numbers_match_like_the_card_index():
-    assert delta.key_of(E("x", set_code="neo", collector_number="1*")) == delta.key_of(E("x", set_code="neo", collector_number="1★"))
-    assert delta.key_of(E("x", set_code="neo", collector_number="007a")) == delta.key_of(E("x", set_code="neo", collector_number="7A"))
+    def key(number):
+        return delta.key_of(E("x", set_code="NEO", collector_number=number))
+
+    assert key("1*") == key("1★") and key("007a") == key("7A")
 
 
 @pytest.mark.parametrize("by, folders", [(("folder", "name"), False), (("name",), True), (delta.BY_PRINTING, True),

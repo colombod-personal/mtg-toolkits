@@ -12,6 +12,7 @@ A Python library for Magic: The Gathering projects: card data, pricing, decks an
 | `mtg_toolkits.delta` | Diffs collection snapshots (added/removed/changed), writes only the changes, deck coverage (owned/partial/missing) |
 | `mtg_toolkits.decklist` | Parses pasted decklists (Archidekt, Moxfield, Arena, MTGO formats, sections, foil/etched) and deck URLs |
 | `mtg_toolkits.enrich` | Joins a collection with Scryfall text, attributes and prices, and writes a report |
+| `mtg_toolkits.normalize` | Set code / collector number normalisation (Dragon Shield aliases) and locale-tolerant number parsing |
 
 See [`docs/research.md`](docs/research.md) for API notes, limits, file formats and the pricing strategy.
 
@@ -75,6 +76,29 @@ from mtg_toolkits import decklist, delta
 deck = decklist.parse_text(open("deck.txt").read())      # or ArchidektClient().get_deck(id).to_entries()
 for line in delta.coverage(deck.to_entries(), owned=new):
     print(line.status, line.have, "/", line.need, line.entry.name)   # owned / partial / missing
+```
+
+Normalise set codes, collector numbers and prices the way the library matches them:
+
+```python
+from mtg_toolkits import normalize_set_code, normalize_collector_number, parse_number, set_alias_map
+
+normalize_set_code(" GK2_ORZHOV ")      # 'gk2'  (strip, lower-case, Dragon Shield aliases)
+normalize_collector_number("007*")      # '7★'   (lower-case, '*' -> '★', no leading zeros)
+parse_number("1.234,50 €")              # 1234.5 (either decimal separator; "1,234" -> 1234)
+set_alias_map()                         # {'legi': 'leg', 'gk2_orzhov': 'gk2', ...} to ship to a front end;
+                                        # also map any code starting with normalize.SET_ALIAS_PREFIXES
+                                        # ('gk1_', 'gk2_') to its first three characters
+```
+
+Match a collection against a Scryfall bulk file without loading every card:
+
+```python
+from mtg_toolkits.scryfall import Card, card_matches_keys, index_keys, iter_bulk_file, resolve_offline
+
+keys = index_keys(entries)               # ids, (set, number) pairs and names, normalised like the matcher
+cards = (Card.from_json(o) for o in iter_bulk_file("all-cards.jsonl.gz") if card_matches_keys(o, keys))
+results = resolve_offline(entries, cards)  # prefers the entry's language, then English
 ```
 
 ## Tests

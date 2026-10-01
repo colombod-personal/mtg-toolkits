@@ -11,6 +11,6 @@
 from .models import CollectionEntry, Condition, Finish
 from .normalize import normalize_collector_number, normalize_set_code, parse_number, parse_quantity, set_alias_map
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["CollectionEntry", "Condition", "Finish", "normalize_collector_number", "normalize_set_code",
            "parse_number", "parse_quantity", "set_alias_map", "__version__"]

@@ -13,7 +13,8 @@ def test_parse_export():
     entries = dragonshield.read(FIXTURE)
     assert len(entries) == 3
     sol, delver, bolt = entries
-    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 2, 1, "c21", "263")  # normalised; written back as "C21"
+    # set codes are normalised (lower-case) and written back as read ("C21")
+    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 2, 1, "c21", "263")
     assert sol.purchase_price == 1.5 and sol.purchase_date == date(2023, 5, 1)
     assert sol.source_prices == {"low": 1.2, "mid": 1.6, "market": 1.55}
     assert delver.finish is Finish.FOIL and delver.condition is Condition.LIGHT_PLAYED

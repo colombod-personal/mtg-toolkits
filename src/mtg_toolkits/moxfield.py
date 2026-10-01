@@ -30,7 +30,7 @@ from typing import Iterable
 
 from .dragonshield import LANGUAGE_NAMES, LANGUAGES
 from .models import CollectionEntry, Condition, Finish
-from .normalize import csv_errors_as_value_errors, parse_number, parse_quantity
+from .normalize import csv_errors_as_value_errors, normalize_set_code, parse_number, parse_quantity
 
 COLUMNS = ["Count", "Tradelist Count", "Name", "Edition", "Condition", "Language", "Foil", "Tags",
            "Last Modified", "Collector Number", "Alter", "Proxy", "Purchase Price"]
@@ -85,11 +85,15 @@ def parse(text: str) -> list[CollectionEntry]:
             continue
         language = row.get("Language", "").lower()
         extra = {k: row[k] for k in ("Tags", "Alter", "Proxy", "Last Modified") if row.get(k)}
+        raw_set = row.get("Edition", "")
+        set_code = normalize_set_code(raw_set)
+        if set_code and raw_set.lower() != set_code:  # an alias (e.g. GK2_ORZHOV): written back as read
+            extra["Edition"] = raw_set
         entries.append(CollectionEntry(
             name=row["Name"],
             quantity=_num(row.get("Count"), int, 1),
             trade_quantity=_num(row.get("Tradelist Count"), int, 0),
-            set_code=row.get("Edition", "").lower() or None,
+            set_code=set_code,
             collector_number=row.get("Collector Number") or None,
             finish=FINISHES.get(row.get("Foil", "").lower(), Finish.NONFOIL),
             condition=CONDITIONS.get(row.get("Condition", "").lower(), Condition.NEAR_MINT),
@@ -114,7 +118,7 @@ def dumps(entries: Iterable[CollectionEntry]) -> str:
     for e in entries:
         tags = e.extra.get("Tags") or e.folder or ""
         writer.writerow([
-            e.quantity, e.trade_quantity or 0, e.name, (e.set_code or "").lower(), CONDITION_NAMES[e.condition],
+            e.quantity, e.trade_quantity or 0, e.name, e.extra.get("Edition") or (e.set_code or "").lower(), CONDITION_NAMES[e.condition],
             LANGUAGE_NAMES.get(e.language, e.language), FINISH_NAMES[e.finish], tags,
             e.extra.get("Last Modified") or (e.purchase_date.isoformat() if e.purchase_date else ""),
             e.collector_number or "", e.extra.get("Alter", "False"), e.extra.get("Proxy", "False"),

@@ -84,3 +84,15 @@ def test_integer_valued_float_count_and_bad_counts():
 def test_oversized_field_is_a_value_error():
     with pytest.raises(ValueError):
         moxfield.parse('Count,Name\n1,"' + "x" * 200_000 + '"\n')
+
+
+def test_dragon_shield_set_codes_become_scryfall_codes_and_write_back_as_read():
+    from mtg_toolkits import moxfield
+
+    text = ("Count,Tradelist Count,Name,Edition,Condition,Language,Foil,Tags,Last Modified,Collector Number\n"
+            "1,0,Belfry Spirit,GK2_ORZHOV,Near Mint,English,,,,29\n"
+            "1,0,Sol Ring,C21,Near Mint,English,,,,263\n")
+    belfry, sol = moxfield.parse(text)
+    assert (belfry.set_code, sol.set_code) == ("gk2", "c21")
+    out = moxfield.dumps([belfry, sol])
+    assert ",gk2_orzhov," in out.lower() and ",c21," in out

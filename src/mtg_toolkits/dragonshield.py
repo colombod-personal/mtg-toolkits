@@ -19,6 +19,10 @@ Quirks handled here:
   Any non-plain value is kept in ``entry.extra["Printing"]`` so writing the
   file back is lossless.
 * Languages are English names ("Japanese"), mapped to Scryfall codes ("ja").
+  A Condition or Language the library doesn't know (``"Mint/NM"``) reads as
+  NearMint / English and the original is kept in ``entry.extra`` so it is
+  written back unchanged (unless the entry's condition or language was edited).
+* Prices may use either decimal separator (see :func:`mtg_toolkits.normalize.parse_number`).
 * Double-faced cards use the full ``"Front // Back"`` name.
 * Set codes are mostly Scryfall's (including promo sets like ``PWOE`` and The
   List numbers like ``C15-56``). A few Dragon Shield-only codes are mapped via
@@ -38,6 +42,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .models import CollectionEntry, Condition, Finish
+from .normalize import csv_errors_as_value_errors, parse_number, parse_quantity
 
 COLUMNS = [
     "Folder Name", "Quantity", "Trade Quantity", "Card Name", "Set Code", "Set Name",
@@ -65,11 +70,13 @@ LANGUAGES = {
     "portuguese": "pt", "japanese": "ja", "korean": "ko", "russian": "ru",
     "simplified chinese": "zhs", "chinese simplified": "zhs",
     "traditional chinese": "zht", "chinese traditional": "zht",
+    "phyrexian": "ph", "hebrew": "he", "latin": "la", "arabic": "ar", "sanskrit": "sa", "ancient greek": "grc",
 }
 LANGUAGE_NAMES = {
     "en": "English", "es": "Spanish", "fr": "French", "de": "German", "it": "Italian",
     "pt": "Portuguese", "ja": "Japanese", "ko": "Korean", "ru": "Russian",
     "zhs": "Simplified Chinese", "zht": "Traditional Chinese",
+    "ph": "Phyrexian", "he": "Hebrew", "la": "Latin", "ar": "Arabic", "sa": "Sanskrit", "grc": "Ancient Greek",
 }
 
 
@@ -106,22 +113,12 @@ def _norm(s: str) -> str:
     return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
-def _float(value: str | None) -> float | None:
-    if value is None:
-        return None
-    value = value.strip().lstrip("$€£")
-    # "1,50" (decimal comma) vs "1,234.50" (thousands separator)
-    value = value.replace(",", ".") if ("," in value and "." not in value) else value.replace(",", "")
-    try:
-        return float(value) if value else None
-    except ValueError:
-        return None
+_float = parse_number  # "1,50", "1.234,50", "$1,234.50" (kept for callers of the old name)
 
 
 def _quantity(value: str | None) -> int:
     """Missing or blank means 1; an explicit 0 stays 0."""
-    q = _float(value)
-    return 1 if q is None else int(q)
+    return parse_quantity(value, 1)
 
 
 def _date(value: str | None) -> date | None:
@@ -139,12 +136,13 @@ def _date(value: str | None) -> date | None:
 _KNOWN = {_norm(c) for c in COLUMNS}
 
 
+@csv_errors_as_value_errors
 def parse(text: str) -> list[CollectionEntry]:
     """Parse the contents of a Dragon Shield CSV export."""
     text = text.lstrip("﻿")
     delimiter = ","
     first, _, rest = text.partition("\n")
-    marker = first.strip().strip('"').strip()
+    marker = first.strip('\r\n "')  # not str.strip(): "sep=\t" declares a tab
     if marker.lower().startswith("sep="):
         delimiter = marker[4:5] or ","
         text = rest
@@ -174,18 +172,23 @@ def parse(text: str) -> list[CollectionEntry]:
             extra["Printing"] = printing
         if raw_set and set_code != raw_set:
             extra["Set Code"] = raw_set
+        condition, language = col(row, "Condition") or "", col(row, "Language") or ""
+        if condition and _norm(condition) not in CONDITIONS:
+            extra["Condition"] = condition
+        if language and language.lower() not in LANGUAGES:
+            extra["Language"] = language
         prices = {p.lower(): v for p in PRICE_COLUMNS if (v := _float(col(row, p))) is not None}
         entries.append(
             CollectionEntry(
                 name=name,
                 quantity=_quantity(col(row, "Quantity")),
-                trade_quantity=int(_float(col(row, "Trade Quantity")) or 0),
+                trade_quantity=parse_quantity(col(row, "Trade Quantity"), 0),
                 set_code=set_code,
                 set_name=(col(row, "Set Name") or None),
                 collector_number=(col(row, "Card Number") or None),
-                condition=CONDITIONS.get(_norm(col(row, "Condition") or ""), Condition.NEAR_MINT),
+                condition=CONDITIONS.get(_norm(condition), Condition.NEAR_MINT),
                 finish=_finish(printing),
-                language=LANGUAGES.get((col(row, "Language") or "english").lower(), "en"),
+                language=LANGUAGES.get(language.lower(), "en"),
                 folder=col(row, "Folder Name") or None,
                 purchase_price=_float(col(row, "Price Bought")),
                 purchase_date=_date(col(row, "Date Bought")),
@@ -205,6 +208,22 @@ def _printing(e: CollectionEntry) -> str:
     if original is not None and _finish(original) is e.finish or (original == "" and e.finish is Finish.ETCHED):
         return original
     return "Normal" if e.finish is Finish.NONFOIL else "Foil"
+
+
+def _original(e: CollectionEntry, column: str, current: str, read_as) -> str:
+    """The unrecognised value read from ``column``, while the entry still holds what it was read as."""
+    original = e.extra.get(column)
+    return original if original and read_as(original) == current else current
+
+
+def _condition(e: CollectionEntry) -> str:
+    name = CONDITION_NAMES[e.condition]
+    return _original(e, "Condition", name, lambda v: CONDITION_NAMES[CONDITIONS.get(_norm(v), Condition.NEAR_MINT)])
+
+
+def _language(e: CollectionEntry) -> str:
+    name = LANGUAGE_NAMES.get(e.language, e.language)
+    return _original(e, "Language", name, lambda v: LANGUAGE_NAMES[LANGUAGES.get(v.lower(), "en")])
 
 
 def _row(values: Iterable[object]) -> str:
@@ -249,9 +268,9 @@ def dumps(entries: Iterable[CollectionEntry], *, sep_line: bool = True) -> str:
             e.extra.get("Set Code") or (e.set_code or "").upper(),
             e.set_name or "",
             e.collector_number or "",
-            CONDITION_NAMES[e.condition],
+            _condition(e),
             _printing(e),
-            LANGUAGE_NAMES.get(e.language, e.language),
+            _language(e),
             f"{e.purchase_price:.2f}" if e.purchase_price is not None else "",
             e.purchase_date.isoformat() if e.purchase_date else "",
             *[f"{e.source_prices[p.lower()]:.2f}" if p.lower() in e.source_prices else "" for p in PRICE_COLUMNS],

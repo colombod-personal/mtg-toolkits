@@ -1,6 +1,8 @@
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from mtg_toolkits import dragonshield
 from mtg_toolkits.models import Condition, Finish
 
@@ -84,3 +86,56 @@ def test_columns_the_app_does_not_export_are_kept():
     assert dragonshield.dumps([e]) == with_notes  # appended columns come back byte for byte
     plain = dragonshield.parse(f'"sep=,"\r\n{header}\r\n{row}\r\n')
     assert dragonshield.dumps(plain + [e]).splitlines()[1].endswith(",MARKET,Notes")  # blank for entries without it
+
+
+HEADER = ",".join(dragonshield.COLUMNS) + "\n"
+
+
+def test_tab_separator_line():
+    text = "sep=\t\n" + HEADER.replace(",", "\t") + "F\t1\t0\tBolt\tM11\tM11\t149\tNearMint\tNormal\tEnglish\t1,50\t\t\t\t\n"
+    [e] = dragonshield.parse(text)
+    assert (e.name, e.collector_number, e.purchase_price) == ("Bolt", "149", 1.5)
+    [e] = dragonshield.parse('"sep=\t"\r\n' + HEADER.replace(",", "\t") + "F\t2\t0\tBolt\n")
+    assert (e.name, e.quantity) == ("Bolt", 2)
+
+
+@pytest.mark.parametrize("price, expected", [("1.234,50", 1234.5), ("1,234", 1234.0), ("1,234.50", 1234.5),
+                                             ("€1,50", 1.5), ("1,50", 1.5)])
+def test_localised_prices(price, expected):
+    [e] = dragonshield.parse(HEADER + f'F,1,0,Bolt,M11,M11,149,NearMint,Normal,English,"{price}",,"{price}",,\n')
+    assert e.purchase_price == expected and e.source_prices == {"low": expected}
+
+
+def test_rows_with_more_fields_than_the_header():
+    [e] = dragonshield.parse(HEADER + "F,1,0,Bolt,M11,M11,149,NearMint,Normal,English,,,,,,overflow\n")
+    assert (e.name, e.extra) == ("Bolt", {})
+
+
+def test_unknown_condition_and_language_round_trip():
+    text = ('"sep=,"\r\n' + HEADER.rstrip("\n") + "\r\n"
+            "F,1,0,Bolt,M11,M11,149,Mint/NM,Normal,Klingon,,,,,\r\n"
+            "F,1,0,Bolt,M11,M11,149,NearMint,Normal,Phyrexian,,,,,\r\n")
+    odd, phyrexian = dragonshield.parse(text)
+    assert (odd.condition, odd.language) == (Condition.NEAR_MINT, "en")
+    assert odd.extra == {"Condition": "Mint/NM", "Language": "Klingon"}
+    assert phyrexian.language == "ph" and phyrexian.extra == {}
+    assert dragonshield.dumps([odd, phyrexian]) == text
+    odd.condition, odd.language = Condition.PLAYED, "de"  # an edited value wins over the original string
+    assert ",Played,Normal,German," in dragonshield.dumps([odd])
+
+
+@pytest.mark.parametrize("code, name", [("ph", "Phyrexian"), ("he", "Hebrew"), ("la", "Latin"), ("ar", "Arabic"),
+                                        ("sa", "Sanskrit"), ("grc", "Ancient Greek")])
+def test_rare_languages(code, name):
+    assert dragonshield.LANGUAGES[name.lower()] == code and dragonshield.LANGUAGE_NAMES[code] == name
+
+
+@pytest.mark.parametrize("qty", ["1e30", "inf", "abc", "99999999999999999999999", "1.5"])
+def test_bad_quantity_is_a_value_error(qty):
+    with pytest.raises(ValueError, match="quantity"):
+        dragonshield.parse(f"Card Name,Quantity\nSol Ring,{qty}\n")
+
+
+def test_oversized_field_is_a_value_error():
+    with pytest.raises(ValueError):
+        dragonshield.parse('Card Name,Quantity\n"' + "x" * 200_000 + '",1\n')

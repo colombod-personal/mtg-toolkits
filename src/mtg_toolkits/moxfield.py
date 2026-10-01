@@ -13,7 +13,8 @@ is lenient because files in the wild vary:
 - conditions as ``NM`` or ``Near Mint``
 - finishes as ``foil``, ``Foil``, ``etched`` or ``Normal``
 - languages as names or codes
-- extra or missing columns
+- extra or missing columns, and rows with more fields than the header (the overflow is ignored)
+- prices in either locale (``1,234.50``, ``1.234,50``, ``€1.50``)
 
 Conditions map onto the library's (Dragon Shield) scale the same way as the Archidekt export:
 M, NM, LP (excellent), MP (light played), HP (played) and D (poor).
@@ -29,6 +30,7 @@ from typing import Iterable
 
 from .dragonshield import LANGUAGE_NAMES, LANGUAGES
 from .models import CollectionEntry, Condition, Finish
+from .normalize import csv_errors_as_value_errors, parse_number, parse_quantity
 
 COLUMNS = ["Count", "Tradelist Count", "Name", "Edition", "Condition", "Language", "Foil", "Tags",
            "Last Modified", "Collector Number", "Alter", "Proxy", "Purchase Price"]
@@ -52,13 +54,11 @@ FINISH_NAMES = {Finish.NONFOIL: "", Finish.FOIL: "foil", Finish.ETCHED: "etched"
 
 
 def _num(value: str | None, cast=int, default=None):
-    value = (value or "").strip().replace("$", "")
-    if not value:
-        return default
-    try:
-        return cast(value.replace(",", ".") if cast is float else value)
-    except ValueError:
-        return default
+    """A count (ValueError if malformed) or a price (``default`` if unreadable)."""
+    if cast is int:
+        return parse_quantity(value, default)
+    number = parse_number(value)
+    return default if number is None else cast(number)
 
 
 def _date(value: str | None) -> date | None:
@@ -71,6 +71,7 @@ def _date(value: str | None) -> date | None:
     return None
 
 
+@csv_errors_as_value_errors
 def parse(text: str) -> list[CollectionEntry]:
     """Parse a Moxfield collection CSV (as text) into entries."""
     reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))
@@ -78,7 +79,8 @@ def parse(text: str) -> list[CollectionEntry]:
         raise ValueError("Not a Moxfield collection CSV: expected at least 'Count' and 'Name' columns")
     entries = []
     for raw in reader:
-        row = {(k or "").strip(): (v or "").strip() for k, v in raw.items()}
+        # Fields beyond the header land under the key None (as a list): ignore them.
+        row = {k.strip(): (v or "").strip() for k, v in raw.items() if k is not None}
         if not row.get("Name"):
             continue
         language = row.get("Language", "").lower()

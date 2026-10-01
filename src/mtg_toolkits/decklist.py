@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from .models import CollectionEntry, Finish
+from .normalize import MAX_QUANTITY
 
 MAIN = "main"
 SECTIONS = {
@@ -37,7 +38,7 @@ PLAYED_SECTIONS = (MAIN, "commander", "companion")
 
 _HEADER = re.compile(r"^(?://|#)?\s*([A-Za-z ]+?)\s*:?\s*(?:\(\d+\))?$")
 _LINE = re.compile(
-    r"""^(?P<qty>\d+)\s*x?\s+
+    r"""^(?P<qty>\d{1,7})\s*x?\s+
         (?P<name>.+?)
         # (SET) in parentheses, or [SET] in brackets only when it looks like a set code
         # (upper-case, 2-6 chars); anything else in brackets is an Archidekt category.
@@ -85,7 +86,8 @@ class Decklist:
 
 
 def parse_text(text: str, name: str | None = None) -> Decklist:
-    """Parse a pasted decklist. Lines that aren't cards or headers go to ``unparsed``."""
+    """Parse a pasted decklist. Lines that aren't cards or headers go to ``unparsed``,
+    as do card lines with an absurd quantity (over :data:`~mtg_toolkits.normalize.MAX_QUANTITY`)."""
     lines: list[DeckLine] = []
     unparsed: list[str] = []
     section = MAIN
@@ -97,6 +99,9 @@ def parse_text(text: str, name: str | None = None) -> Decklist:
         if line[:3].upper() == "SB:":
             line, line_section = line[3:].strip(), "sideboard"
         m = _LINE.match(line)
+        if m and int(m["qty"]) > MAX_QUANTITY:
+            unparsed.append(raw)
+            continue
         if not m:
             header = _HEADER.match(line)
             key = header.group(1).strip().lower() if header else None

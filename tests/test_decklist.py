@@ -84,3 +84,10 @@ def test_bracket_category_is_not_a_set_code():
     assert sol_cmr.set_code == "cmr"
     assert (sol_c21.name, sol_c21.set_code, sol_c21.collector_number, sol_c21.categories) == ("Sol Ring", "c21", "263", ["Ramp"])
     assert deck.card_count == 3  # the sideboard card doesn't count
+
+
+def test_absurd_quantities_are_unparsed():
+    huge = "9" * 5000 + " Sol Ring"
+    deck = parse_text(f"{huge}\n2000000 Island\n1000000 Swamp\n1 Sol Ring\n")
+    assert [(l.quantity, l.name) for l in deck.lines] == [(1_000_000, "Swamp"), (1, "Sol Ring")]
+    assert deck.unparsed == [huge, "2000000 Island"]

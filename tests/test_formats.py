@@ -75,3 +75,51 @@ def test_generic_csv_keeps_source_prices_and_extras():
     assert [(e.source_prices, e.extra) for e in back] == [(e.source_prices, e.extra) for e in entries]
     # and a Dragon Shield export rebuilt from the generic copy is byte-identical
     assert formats.FORMATS["dragonshield"].dumps(back) == formats.FORMATS["dragonshield"].dumps(entries)
+
+
+GENERIC = ",".join(formats.GENERIC_COLUMNS) + "\n"
+
+
+def test_generic_csv_is_lenient():
+    rows = ['1.0,0,Bolt,m11,,149,nonfoil,near_mint,en,,,,,,', '1,0,Bolt,m11,,149,Foil,near_mint,en,,,,,,',
+            '1,0,Bolt,m11,,149,nonfoil,NM,en,,,,,,', '1,0,Bolt,m11,,149,nonfoil,near_mint,en,,"1,50",,,,',
+            '1,0,Bolt,m11,,149, Foil Etched ,Lightly Played,en,,$2.00,,,,', '1,0,Bolt,m11,,149,,LightPlayed,en,,,,,,',
+            '1,0,Bolt,m11,,149,,DMG,en,,,,,,,overflow']
+    fmt, entries = formats.parse(GENERIC + "\n".join(rows) + "\n")
+    assert fmt == "csv"
+    assert [(e.quantity, e.finish, e.condition, e.purchase_price) for e in entries] == [
+        (1, Finish.NONFOIL, Condition.NEAR_MINT, None),
+        (1, Finish.FOIL, Condition.NEAR_MINT, None),
+        (1, Finish.NONFOIL, Condition.NEAR_MINT, None),
+        (1, Finish.NONFOIL, Condition.NEAR_MINT, 1.5),
+        (1, Finish.ETCHED, Condition.EXCELLENT, 2.0),
+        (1, Finish.NONFOIL, Condition.LIGHT_PLAYED, None),
+        (1, Finish.NONFOIL, Condition.POOR, None),
+    ]
+
+
+@pytest.mark.parametrize("row", [
+    "1,0,Bolt,,,,sparkly,,,,,,,,", "1,0,Bolt,,,,,shredded,,,,,,,", "abc,0,Bolt,,,,,,,,,,,,",
+    "inf,0,Bolt,,,,,,,,,,,,", "99999999999999999999999,0,Bolt,,,,,,,,,,,,", "1,0,Bolt,,,,,,,,,,,[1],",
+    '1,0,Bolt,,,,,,,,,,,"{""a"": null}",', '1,0,Bolt,,,,,,,,,,,"{""a"": ""x""}",', "1,0,Bolt,,,,,,,,,,,,[1]",
+    '1,0,Bolt,,,,,,,,,,,,"{""a"": ', "1,0,Bolt,,,,,,,,,not-a-date,,,", '"' + "x" * 200_000 + '",0,Bolt,,,,,,,,,,,,',
+])
+def test_malformed_generic_csv_raises_value_error(row):
+    with pytest.raises(ValueError):
+        formats.parse(GENERIC + row + "\n")
+
+
+def test_generic_extra_null_becomes_empty_string():
+    [e] = formats.parse_generic(GENERIC + '1,0,Bolt,,,,,,,,,,,,"{""a"": null, ""b"": 2}"\n')
+    assert e.extra == {"a": "", "b": "2"}
+
+
+def test_detect_tab_separator_line():
+    text = "sep=\t\nFolder Name\tQuantity\tCard Name\nBinder\t2\tSol Ring\n"
+    assert formats.detect(text) == "dragonshield"
+    assert formats.parse(text)[1][0].quantity == 2
+
+
+def test_oversized_header_is_unrecognised():
+    with pytest.raises(ValueError, match="Unrecognised"):
+        formats.parse('"' + "x" * 200_000 + '",Card Name\n')

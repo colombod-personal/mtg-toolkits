@@ -179,9 +179,7 @@ class CollectionDiff:
         ``diff(old, new).apply(old)`` reproduces ``new`` at the diff's key
         granularity. Keys that drop to zero are left out.
         """
-        folders = "folder" in self.fields
-        by = tuple(f for f in self.fields if f != "folder")
-        result = aggregate(base, by, folders=folders)
+        result = aggregate(base, self.fields)
         for line in self.lines:
             if not line.delta:
                 continue
@@ -210,12 +208,13 @@ def diff(
     *,
     folders: bool = False,
 ) -> CollectionDiff:
-    """Compare two snapshots. Lines are sorted by status, then key."""
+    """Compare two snapshots. Lines are sorted by status, then key.
+
+    Line keys are laid out like :func:`key_of` (``by`` order, then the folder if ``folders``).
+    """
     fields = _fields(by, folders)
-    folders = "folder" in fields  # via folders=True or listed in `by`
-    by_only = tuple(f for f in fields if f != "folder")
-    before = aggregate(old, by_only, folders=folders)
-    after = aggregate(new, by_only, folders=folders)
+    before = aggregate(old, fields)
+    after = aggregate(new, fields)
     lines = []
     for k in before.keys() | after.keys():
         rep = after.get(k) or before[k]

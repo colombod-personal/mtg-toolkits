@@ -1,6 +1,8 @@
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from mtg_toolkits import dragonshield
 from mtg_toolkits.models import Condition, Finish
 
@@ -11,7 +13,8 @@ def test_parse_export():
     entries = dragonshield.read(FIXTURE)
     assert len(entries) == 3
     sol, delver, bolt = entries
-    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 2, 1, "C21", "263")
+    # set codes are normalised (lower-case) and written back as read ("C21")
+    assert (sol.name, sol.quantity, sol.trade_quantity, sol.set_code, sol.collector_number) == ("Sol Ring", 2, 1, "c21", "263")
     assert sol.purchase_price == 1.5 and sol.purchase_date == date(2023, 5, 1)
     assert sol.source_prices == {"low": 1.2, "mid": 1.6, "market": 1.55}
     assert delver.finish is Finish.FOIL and delver.condition is Condition.LIGHT_PLAYED
@@ -84,3 +87,79 @@ def test_columns_the_app_does_not_export_are_kept():
     assert dragonshield.dumps([e]) == with_notes  # appended columns come back byte for byte
     plain = dragonshield.parse(f'"sep=,"\r\n{header}\r\n{row}\r\n')
     assert dragonshield.dumps(plain + [e]).splitlines()[1].endswith(",MARKET,Notes")  # blank for entries without it
+
+
+HEADER = ",".join(dragonshield.COLUMNS) + "\n"
+
+
+def test_tab_separator_line():
+    text = "sep=\t\n" + HEADER.replace(",", "\t") + "F\t1\t0\tBolt\tM11\tM11\t149\tNearMint\tNormal\tEnglish\t1,50\t\t\t\t\n"
+    [e] = dragonshield.parse(text)
+    assert (e.name, e.collector_number, e.purchase_price) == ("Bolt", "149", 1.5)
+    [e] = dragonshield.parse('"sep=\t"\r\n' + HEADER.replace(",", "\t") + "F\t2\t0\tBolt\n")
+    assert (e.name, e.quantity) == ("Bolt", 2)
+
+
+@pytest.mark.parametrize("price, expected", [("1.234,50", 1234.5), ("1,234", 1234.0), ("1,234.50", 1234.5),
+                                             ("€1,50", 1.5), ("1,50", 1.5)])
+def test_localised_prices(price, expected):
+    [e] = dragonshield.parse(HEADER + f'F,1,0,Bolt,M11,M11,149,NearMint,Normal,English,"{price}",,"{price}",,\n')
+    assert e.purchase_price == expected and e.source_prices == {"low": expected}
+
+
+def test_rows_with_more_fields_than_the_header():
+    [e] = dragonshield.parse(HEADER + "F,1,0,Bolt,M11,M11,149,NearMint,Normal,English,,,,,,overflow\n")
+    assert (e.name, e.extra) == ("Bolt", {})
+
+
+def test_unknown_condition_and_language_round_trip():
+    text = ('"sep=,"\r\n' + HEADER.rstrip("\n") + "\r\n"
+            "F,1,0,Bolt,M11,M11,149,Mint/NM,Normal,Klingon,,,,,\r\n"
+            "F,1,0,Bolt,M11,M11,149,NearMint,Normal,Phyrexian,,,,,\r\n")
+    odd, phyrexian = dragonshield.parse(text)
+    assert (odd.condition, odd.language) == (Condition.NEAR_MINT, "en")
+    assert odd.extra == {"Condition": "Mint/NM", "Language": "Klingon"}
+    assert phyrexian.language == "ph" and phyrexian.extra == {}
+    assert dragonshield.dumps([odd, phyrexian]) == text
+    odd.condition, odd.language = Condition.PLAYED, "de"  # an edited value wins over the original string
+    assert ",Played,Normal,German," in dragonshield.dumps([odd])
+
+
+@pytest.mark.parametrize("code, name", [("ph", "Phyrexian"), ("he", "Hebrew"), ("la", "Latin"), ("ar", "Arabic"),
+                                        ("sa", "Sanskrit"), ("grc", "Ancient Greek")])
+def test_rare_languages(code, name):
+    assert dragonshield.LANGUAGES[name.lower()] == code and dragonshield.LANGUAGE_NAMES[code] == name
+
+
+@pytest.mark.parametrize("qty", ["1e30", "inf", "abc", "99999999999999999999999", "1.5"])
+def test_bad_quantity_is_a_value_error(qty):
+    with pytest.raises(ValueError, match="quantity"):
+        dragonshield.parse(f"Card Name,Quantity\nSol Ring,{qty}\n")
+
+
+def test_oversized_field_is_a_value_error():
+    with pytest.raises(ValueError):
+        dragonshield.parse('Card Name,Quantity\n"' + "x" * 200_000 + '",1\n')
+
+
+def test_set_codes_are_normalised_and_written_back_as_read():
+    text = '"sep=,"\r\n' + HEADER.rstrip("\n") + "\r\n" + "".join(
+        f"F,1,0,Bolt,{code},M11,149,NearMint,Normal,English,,,,,\r\n" for code in ("M11", "m11", "LEGI"))
+    upper, lower, legends = dragonshield.parse(text)
+    assert [e.set_code for e in (upper, lower, legends)] == ["m11", "m11", "leg"]
+    assert (upper.extra, lower.extra, legends.extra) == ({}, {"Set Code": "m11"}, {"Set Code": "LEGI"})
+    assert dragonshield.dumps([upper, lower, legends]) == text
+
+
+def test_an_edited_set_code_wins_over_the_one_read_from_the_file():
+    from mtg_toolkits import dragonshield, moxfield
+
+    ds = dragonshield.parse('"sep=,"\nFolder Name,Quantity,Trade Quantity,Card Name,Set Code,Set Name,Card Number,'
+                            'Condition,Printing,Language,Price Bought,Date Bought,LOW,MID,MARKET\n'
+                            'Box,1,0,Belfry Spirit,GK2_ORZHOV,Guild Kit,29,NearMint,Normal,English,0.1,2024-01-01,0,0,0\n')
+    assert "GK2_ORZHOV" in dragonshield.dumps(ds)  # unchanged: written back as read
+    ds[0].set_code = "neo"
+    assert "GK2_ORZHOV" not in dragonshield.dumps(ds) and ",NEO," in dragonshield.dumps(ds)
+    mx = moxfield.parse("Count,Name,Edition,Collector Number\n1,Belfry Spirit,GK2_ORZHOV,29\n")
+    mx[0].set_code = "neo"
+    assert "gk2_orzhov" not in moxfield.dumps(mx).lower() and ",neo," in moxfield.dumps(mx)

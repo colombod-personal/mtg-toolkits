@@ -92,3 +92,20 @@ def test_folder_in_by_is_honoured():
     d = delta.diff(old, new, delta.BY_PRINTING + ("folder",))
     assert d.summary()["added"] == 1 and d.summary()["removed"] == 1
     assert [e.folder for e in d.apply(old)] == ["y"]
+
+
+def test_collector_numbers_match_like_the_card_index():
+    def key(number):
+        return delta.key_of(E("x", set_code="NEO", collector_number=number))
+
+    assert key("1*") == key("1★") and key("007a") == key("7A")
+
+
+@pytest.mark.parametrize("by, folders", [(("folder", "name"), False), (("name",), True), (delta.BY_PRINTING, True),
+                                         (("set_code", "folder", "name"), True)])
+def test_diff_keys_match_key_of(by, folders):
+    a, b = E("Bolt", set_code="M11", collector_number="0149", folder="A"), E("Bolt", 2, folder="B")
+    d = delta.diff([b], [a, b], by, folders=folders)
+    assert {line.key for line in d.lines} == {delta.key_of(e, by, folders=folders) for e in (a, b)}
+    assert set(delta.aggregate([a, b], by, folders=folders)) == {line.key for line in d.lines}
+    assert sorted(e.folder for e in d.apply([b])) == ["A", "B"]

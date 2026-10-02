@@ -60,11 +60,14 @@ hosts directly). "Unverified" means reported by third parties only.
   * Language: full English names (`English`, `Italian`, `Japanese`, …).
   * Dates are `yyyy-MM-dd`, and prices have 2 decimals.
   * Double-faced cards use the **full `Front // Back` name**. Older third-party notes claiming front-face-only are wrong for current exports.
-  * Set codes are **Scryfall's codes, upper-cased**, including promo sets (`PWOE`, `POTJ`, `P30A`, `PLG21`) and The List's `SET-NUM` collector numbers (`C15-56`). The exceptions found are `GK2_ORZHOV` (Scryfall `gk2`) and `LEGI` ("Legends Italian", Scryfall `leg`). They're handled by `dragonshield.SET_ALIASES`, and the original code is kept for round-trips.
+  * Set codes are **Scryfall's codes, upper-cased**, including promo sets (`PWOE`, `POTJ`, `P30A`, `PLG21`) and The List's `SET-NUM` collector numbers (`C15-56`). The exceptions found are `GK2_ORZHOV` (Scryfall `gk2`) and `LEGI` ("Legends Italian", Scryfall `leg`). They're handled by `normalize.normalize_set_code` (exact aliases from `set_alias_map()`, plus the rule that any `gk1_`/`gk2_`-prefixed code maps to its first three characters), and the original code is kept for round-trips.
   * The same printing often appears on many rows (one per purchase date/price). This file has 2,830 such printings, and `delta.aggregate()` sums them.
   * `dragonshield.read()` + `dragonshield.write()` reproduces this file **byte for byte**.
 * Quirks:
   * Column layout reportedly varies between users and app versions, so headers are matched by name.
+  * An Excel `sep=<c>` first line may declare any delimiter, including a tab.
+  * Prices may use a decimal comma (`1,50`) or thousands separators (`1.234,50`, `1,234.50`); see `normalize.parse_number` for the rules. A lone comma followed by exactly three digits (`1,234`) is read as a thousands separator.
+  * Condition or Language values the library doesn't know are read as NearMint / English and the original string is written back.
   * Unknown set codes or collector numbers fall back to a name+set lookup, then name only, in `ScryfallClient.resolve_entries`. The result's `method` says which step matched.
 * `LOW/MID/MARKET` are Dragon Shield's own USD prices (TCGplayer-derived) at export time.
 * Existing converters for reference: [MtgCsvHelper](https://github.com/StepKie/MtgCsvHelper) (column mappings for about 10 sites), [DragonShield-to-Moxfield](https://github.com/KarmaKamikaze/DragonShield-to-Moxfield).

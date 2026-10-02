@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
+from .normalize import _clean_number, normalize_set_code
+
 
 class Finish(str, Enum):
     NONFOIL = "nonfoil"
@@ -47,11 +49,17 @@ class CollectionEntry:
     extra: dict[str, str] = field(default_factory=dict)
 
     def scryfall_identifier(self) -> dict[str, str]:
-        """Best identifier for Scryfall's ``/cards/collection`` endpoint."""
+        """Best identifier for Scryfall's ``/cards/collection`` endpoint.
+
+        Set codes are normalised (:func:`~mtg_toolkits.normalize.normalize_set_code`, so
+        Dragon Shield's ``GK2_ORZHOV`` is sent as ``gk2``), as are collector numbers
+        (``"007"`` -> ``"7"``, ``"1*"`` -> ``"1★"``).
+        """
         if self.scryfall_id:
             return {"id": self.scryfall_id}
-        if self.set_code and self.collector_number:
-            return {"set": self.set_code.lower(), "collector_number": self.collector_number}
-        if self.set_code:
-            return {"name": self.name, "set": self.set_code.lower()}
+        set_code, number = normalize_set_code(self.set_code), _clean_number(self.collector_number)
+        if set_code and number:
+            return {"set": set_code, "collector_number": number}
+        if set_code:
+            return {"name": self.name, "set": set_code}
         return {"name": self.name}

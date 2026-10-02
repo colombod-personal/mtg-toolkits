@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -20,6 +23,24 @@ class ApiError(RuntimeError):
         super().__init__(f"HTTP {status_code}: {message}")
         self.status_code = status_code
         self.payload = payload
+
+
+def retry_after_seconds(value: str | None, now: datetime | None = None) -> float | None:
+    """Seconds a ``Retry-After`` header asks for: a (possibly fractional) delay or an
+    HTTP-date. Never negative; None if absent or unreadable."""
+    value = (value or "").strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError):
+            return None
+        when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+        now = now or datetime.now(timezone.utc)
+        now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        seconds = (when - now).total_seconds()
+    return max(0.0, seconds) if math.isfinite(seconds) else None
 
 
 class Throttle:
@@ -39,13 +60,20 @@ class Throttle:
 
 
 class BaseClient:
-    """Small wrapper around :class:`httpx.Client` with throttling and 429/5xx retry."""
+    """Small wrapper around :class:`httpx.Client` with throttling and retries.
+
+    429 and 5xx responses are retried after the server's ``Retry-After`` (capped at
+    :attr:`max_retry_wait`), else :attr:`rate_limit_backoff` for 429 and ``2**attempt``
+    seconds for 5xx. Network errors (:class:`httpx.TransportError`) are retried the same
+    number of times; if the last attempt fails too, :class:`ApiError` (status 0) is raised.
+    """
 
     base_url: str = ""
     min_interval: float = 0.1
     max_retries: int = 3
     # Seconds to wait after a 429 without Retry-After (Scryfall locks you out for 30 s).
     rate_limit_backoff: float = 30.0
+    max_retry_wait: float = 120.0  # never sleep longer than this, whatever Retry-After says
 
     def __init__(
         self,
@@ -75,17 +103,18 @@ class BaseClient:
         url = self._url(path)
         for attempt in range(self.max_retries + 1):
             (throttle or self._throttle).wait()
-            resp = self._client.request(method, url, **kwargs)
-            if resp.status_code == 429 or resp.status_code >= 500:
-                if attempt < self.max_retries:
-                    retry_after = resp.headers.get("Retry-After")
-                    if retry_after and retry_after.isdigit():
-                        delay = float(retry_after)
-                    elif resp.status_code == 429:
-                        delay = self.rate_limit_backoff
-                    else:
-                        delay = 2**attempt
-                    time.sleep(delay)
-                    continue
+            try:
+                resp = self._client.request(method, url, **kwargs)
+            except httpx.TransportError as exc:
+                if attempt == self.max_retries:
+                    raise ApiError(0, f"{type(exc).__name__}: {exc}") from exc
+                time.sleep(min(2**attempt, self.max_retry_wait))
+                continue
+            if (resp.status_code == 429 or resp.status_code >= 500) and attempt < self.max_retries:
+                delay = retry_after_seconds(resp.headers.get("Retry-After"))
+                if delay is None:
+                    delay = self.rate_limit_backoff if resp.status_code == 429 else 2**attempt
+                time.sleep(min(delay, self.max_retry_wait))
+                continue
             return resp
-        return resp  # pragma: no cover
+        raise AssertionError("unreachable")  # pragma: no cover

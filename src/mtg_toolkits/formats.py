@@ -18,6 +18,8 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
+import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
@@ -25,6 +27,7 @@ from typing import Callable, Iterable
 
 from . import archidekt, dragonshield, moxfield
 from .models import CollectionEntry, Condition, Finish
+from .normalize import csv_errors_as_value_errors, parse_number, parse_quantity
 
 GENERIC_COLUMNS = ["quantity", "trade_quantity", "name", "set_code", "set_name", "collector_number", "finish",
                    "condition", "language", "folder", "purchase_price", "purchase_date", "scryfall_id",
@@ -58,22 +61,67 @@ def dumps_generic(entries: Iterable[CollectionEntry]) -> str:
     return out.getvalue()
 
 
+def parse_finish(value: str | None) -> Finish:
+    """``nonfoil``/``foil``/``etched`` in any case, or a common spelling (``Normal``, ``Foil Etched``)."""
+    text = (value or "").strip().lower()
+    finish = moxfield.FINISHES.get(text) or Finish._value2member_map_.get(text)
+    if finish is None:
+        raise ValueError(f"Unknown finish: {value!r}")
+    return finish
+
+
+def parse_condition(value: str | None) -> Condition:
+    """A :class:`Condition` value in any case or spacing (``near_mint``, ``Near Mint``, ``LightPlayed``),
+    or a grading abbreviation (``NM``, ``LP``, ``MP``, ``HP``, ``DMG``) mapped as Moxfield's are."""
+    text = (value or "near_mint").strip().lower()
+    by_value = {c.value.replace("_", ""): c for c in Condition}
+    condition = by_value.get(re.sub(r"[\s_-]", "", text)) or moxfield.CONDITIONS.get(text)
+    if condition is None:
+        raise ValueError(f"Unknown condition: {value!r}")
+    return condition
+
+
+def _json_object(row: dict[str, str], column: str) -> dict:
+    data = json.loads(row.get(column) or "{}")
+    if not isinstance(data, dict):
+        raise ValueError(f"{column} must be a JSON object, got {row[column][:40]!r}")
+    return data
+
+
+def _source_prices(row: dict[str, str]) -> dict[str, float]:
+    prices, out = _json_object(row, "source_prices"), {}
+    for k, v in prices.items():
+        try:  # a JSON integer can be too large for a float
+            number = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else math.nan
+        except OverflowError:
+            number = math.nan
+        if not math.isfinite(number):
+            raise ValueError(f"source_prices values must be numbers: {row['source_prices'][:40]!r}")
+        out[k] = number
+    return out
+
+
+@csv_errors_as_value_errors
 def parse_generic(text: str) -> list[CollectionEntry]:
+    """Read :func:`dumps_generic` output. Lenient about spellings (``Foil``, ``NM``, ``1,50``,
+    ``2.0``); raises ValueError on values it can't read rather than guessing."""
     entries = []
-    for row in csv.DictReader(io.StringIO(text.lstrip("﻿"))):
+    for raw in csv.DictReader(io.StringIO(text.lstrip("\ufeff"))):
+        row = {k.strip(): (v or "").strip() for k, v in raw.items() if k is not None}  # None: overflow fields
         if not row.get("name"):
             continue
         entries.append(CollectionEntry(
-            name=row["name"], quantity=int(row.get("quantity") or 1), trade_quantity=int(row.get("trade_quantity") or 0),
+            name=row["name"], quantity=parse_quantity(row.get("quantity"), 1),
+            trade_quantity=parse_quantity(row.get("trade_quantity"), 0),
             set_code=row.get("set_code") or None, set_name=row.get("set_name") or None,
             collector_number=row.get("collector_number") or None,
-            finish=Finish(row.get("finish") or "nonfoil"), condition=Condition(row.get("condition") or "near_mint"),
+            finish=parse_finish(row.get("finish")), condition=parse_condition(row.get("condition")),
             language=row.get("language") or "en", folder=row.get("folder") or None,
-            purchase_price=float(row["purchase_price"]) if row.get("purchase_price") else None,
+            purchase_price=parse_number(row.get("purchase_price")),
             purchase_date=date.fromisoformat(row["purchase_date"]) if row.get("purchase_date") else None,
             scryfall_id=row.get("scryfall_id") or None,
-            source_prices={k: float(v) for k, v in json.loads(row["source_prices"]).items()} if row.get("source_prices") else {},
-            extra={k: str(v) for k, v in json.loads(row["extra"]).items()} if row.get("extra") else {},
+            source_prices=_source_prices(row),
+            extra={k: "" if v is None else str(v) for k, v in _json_object(row, "extra").items()},
         ))
     return entries
 
@@ -116,10 +164,13 @@ def detect(text: str) -> str | None:
     lines = text.lstrip("\ufeff").splitlines()
     if not lines:
         return None
-    first = lines[0].strip().strip('"').lower()
+    first = lines[0].strip('\r\n "').lower()  # not str.strip(): "sep=\t" declares a tab
     declared = first[4:] if first.startswith("sep=") and len(first) == 5 else None  # Excel's "sep=X" line
     header = lines[1] if declared and len(lines) > 1 else lines[0]
-    cols = {c.strip().strip('"').lower() for c in next(csv.reader([header], delimiter=declared or ","), [])}
+    try:
+        cols = {c.strip().strip('"').lower() for c in next(csv.reader([header], delimiter=declared or ","), [])}
+    except csv.Error:  # e.g. a field over the csv module's size limit: not a file we know
+        return None
     if {"card name", "quantity"} <= cols or (declared and "card name" in cols):
         return "dragonshield"
     if {"count", "name"} <= cols:
@@ -130,7 +181,7 @@ def detect(text: str) -> str | None:
 
 
 def parse(text: str, fmt: str | None = None) -> tuple[str, list[CollectionEntry]]:
-    """Read a collection file. Raises ValueError naming the supported formats if unrecognised."""
+    """Read a collection file. Raises ValueError (only) on bad input, naming the supported formats if unrecognised."""
     fmt = fmt or detect(text)
     readable = [f.label for f in FORMATS.values() if f.parse]
     if fmt is None or FORMATS.get(fmt) is None or FORMATS[fmt].parse is None:

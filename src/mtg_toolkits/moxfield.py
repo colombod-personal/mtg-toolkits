@@ -13,7 +13,8 @@ is lenient because files in the wild vary:
 - conditions as ``NM`` or ``Near Mint``
 - finishes as ``foil``, ``Foil``, ``etched`` or ``Normal``
 - languages as names or codes
-- extra or missing columns
+- extra or missing columns, and rows with more fields than the header (the overflow is ignored)
+- prices in either locale (``1,234.50``, ``1.234,50``, ``€1.50``)
 
 Conditions map onto the library's (Dragon Shield) scale the same way as the Archidekt export:
 M, NM, LP (excellent), MP (light played), HP (played) and D (poor).
@@ -27,8 +28,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
-from .dragonshield import LANGUAGE_NAMES, LANGUAGES
+from .dragonshield import LANGUAGE_NAMES, LANGUAGES, _as_read
 from .models import CollectionEntry, Condition, Finish
+from .normalize import csv_errors_as_value_errors, normalize_set_code, parse_number, parse_quantity
 
 COLUMNS = ["Count", "Tradelist Count", "Name", "Edition", "Condition", "Language", "Foil", "Tags",
            "Last Modified", "Collector Number", "Alter", "Proxy", "Purchase Price"]
@@ -52,13 +54,11 @@ FINISH_NAMES = {Finish.NONFOIL: "", Finish.FOIL: "foil", Finish.ETCHED: "etched"
 
 
 def _num(value: str | None, cast=int, default=None):
-    value = (value or "").strip().replace("$", "")
-    if not value:
-        return default
-    try:
-        return cast(value.replace(",", ".") if cast is float else value)
-    except ValueError:
-        return default
+    """A count (ValueError if malformed) or a price (``default`` if unreadable)."""
+    if cast is int:
+        return parse_quantity(value, default)
+    number = parse_number(value)
+    return default if number is None else cast(number)
 
 
 def _date(value: str | None) -> date | None:
@@ -71,6 +71,7 @@ def _date(value: str | None) -> date | None:
     return None
 
 
+@csv_errors_as_value_errors
 def parse(text: str) -> list[CollectionEntry]:
     """Parse a Moxfield collection CSV (as text) into entries."""
     reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))
@@ -78,16 +79,21 @@ def parse(text: str) -> list[CollectionEntry]:
         raise ValueError("Not a Moxfield collection CSV: expected at least 'Count' and 'Name' columns")
     entries = []
     for raw in reader:
-        row = {(k or "").strip(): (v or "").strip() for k, v in raw.items()}
+        # Fields beyond the header land under the key None (as a list): ignore them.
+        row = {k.strip(): (v or "").strip() for k, v in raw.items() if k is not None}
         if not row.get("Name"):
             continue
         language = row.get("Language", "").lower()
         extra = {k: row[k] for k in ("Tags", "Alter", "Proxy", "Last Modified") if row.get(k)}
+        raw_set = row.get("Edition", "")
+        set_code = normalize_set_code(raw_set)
+        if set_code and raw_set.lower() != set_code:  # an alias (e.g. GK2_ORZHOV): written back as read
+            extra["Edition"] = raw_set
         entries.append(CollectionEntry(
             name=row["Name"],
             quantity=_num(row.get("Count"), int, 1),
             trade_quantity=_num(row.get("Tradelist Count"), int, 0),
-            set_code=row.get("Edition", "").lower() or None,
+            set_code=set_code,
             collector_number=row.get("Collector Number") or None,
             finish=FINISHES.get(row.get("Foil", "").lower(), Finish.NONFOIL),
             condition=CONDITIONS.get(row.get("Condition", "").lower(), Condition.NEAR_MINT),
@@ -112,7 +118,7 @@ def dumps(entries: Iterable[CollectionEntry]) -> str:
     for e in entries:
         tags = e.extra.get("Tags") or e.folder or ""
         writer.writerow([
-            e.quantity, e.trade_quantity or 0, e.name, (e.set_code or "").lower(), CONDITION_NAMES[e.condition],
+            e.quantity, e.trade_quantity or 0, e.name, _as_read(e.extra.get("Edition"), e.set_code) or (e.set_code or "").lower(), CONDITION_NAMES[e.condition],
             LANGUAGE_NAMES.get(e.language, e.language), FINISH_NAMES[e.finish], tags,
             e.extra.get("Last Modified") or (e.purchase_date.isoformat() if e.purchase_date else ""),
             e.collector_number or "", e.extra.get("Alter", "False"), e.extra.get("Proxy", "False"),

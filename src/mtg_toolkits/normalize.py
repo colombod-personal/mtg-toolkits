@@ -3,13 +3,17 @@
 Set codes (:func:`normalize_set_code`) are stripped, lower-cased and mapped
 from the few Dragon Shield-only codes to Scryfall's:
 
-* exact aliases, listed by :func:`set_alias_map` (``"legi"`` -> ``"leg"``), then
+* exact aliases, listed by :func:`set_alias_map` (``"legi"`` -> ``"leg"``, ``"vthb"`` -> ``"thb"``), then
 * the prefix rule: a code starting with one of :data:`SET_ALIAS_PREFIXES`
   (``gk1_``/``gk2_``, the guild kits) becomes its first three characters
   (``"GK2_ORZHOV"`` -> ``"gk2"``).
 
 A front end that can't call Python can ship ``set_alias_map()`` and
 ``SET_ALIAS_PREFIXES`` as JSON and apply the same two steps.
+
+Codes Scryfall retired in favour of another set (``"mb1"`` -> ``"plst"``) are not rewritten here:
+:func:`merged_set_code` gives the set that took their cards, and :mod:`mtg_toolkits.matching` tries it only
+after the code as written found nothing.
 
 Collector numbers (:func:`normalize_collector_number`) are compared stripped,
 lower-cased, with ``*`` read as ``★`` and leading zeros dropped (``"007a"`` -> ``"7a"``).
@@ -41,8 +45,15 @@ SET_ALIASES = {
     "gk1_selesnya": "gk1",
     "gk2_azorius": "gk2", "gk2_gruul": "gk2", "gk2_orzhov": "gk2", "gk2_rakdos": "gk2", "gk2_simic": "gk2",
     "legi": "leg",  # "Legends Italian"
+    "vthb": "thb",  # Dragon Shield's "Theros Beyond Death" variants: Scryfall's thb with the same name and number
 }
 SET_ALIAS_PREFIXES = ("gk1_", "gk2_")  # any other code with these prefixes maps to its first 3 characters
+
+# Codes a file can carry that Scryfall no longer lists as a set of their own: its API answers each of them with The List
+# (``GET /sets/mb1`` is the set ``plst``) and no printing has them (``cards/mb1/1607`` is a 404). Unlike SET_ALIASES they
+# are tried only after the code as written found nothing, in :mod:`mtg_toolkits.matching`, so a catalog that does hold a
+# printing under the old code still wins. The evidence for each is in docs/research.md.
+MERGED_SET_CODES = {"mb1": "plst", "fmb1": "plst", "phed": "plst", "pagl": "plst", "plist": "plst"}
 
 MAX_QUANTITY = 1_000_000  # copies on one line; anything above is a broken file
 
@@ -60,6 +71,16 @@ def set_alias_map() -> dict[str, str]:
     Also apply the :data:`SET_ALIAS_PREFIXES` rule, or just call :func:`normalize_set_code`.
     """
     return dict(SET_ALIASES)
+
+
+def merged_set_codes() -> dict[str, str]:
+    """The retired set codes and the set that took their cards (lower-case), as a copy: see :data:`MERGED_SET_CODES`."""
+    return dict(MERGED_SET_CODES)
+
+
+def merged_set_code(code: str | None) -> str | None:
+    """The set that took the cards of ``code`` (already normalised or not), or None when ``code`` is not a retired code."""
+    return MERGED_SET_CODES.get((code or "").strip().lower())
 
 
 def normalize_set_code(code: str | None) -> str | None:

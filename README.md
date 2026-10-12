@@ -12,6 +12,7 @@ A Python library for Magic: The Gathering projects: card data, pricing, decks an
 | `mtg_toolkits.delta` | Diffs collection snapshots (added/removed/changed), writes only the changes, deck coverage (owned/partial/missing) |
 | `mtg_toolkits.decklist` | Parses pasted decklists (Archidekt, Moxfield, Arena, MTGO formats, sections, foil/etched) and deck URLs |
 | `mtg_toolkits.enrich` | Joins a collection with Scryfall text, attributes and prices, and writes a report |
+| `mtg_toolkits.matching` | The matching ladder (id, set + number, name + set, name + collector number, name) with a stated rule for the printing, and `derive_set_aliases` to check a file's unknown set codes against the catalog |
 | `mtg_toolkits.normalize` | Set code / collector number normalisation (Dragon Shield aliases) and locale-tolerant number parsing |
 
 See [`docs/research.md`](docs/research.md) for API notes, limits, file formats and the pricing strategy.

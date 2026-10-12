@@ -27,6 +27,8 @@ from urllib.parse import quote
 
 from .http import ApiError, BaseClient, Throttle
 from .models import CollectionEntry, Finish
+from .matching import Printing, PrintingIndex
+from .matching import index_keys as _index_keys
 from .normalize import _clean_number, normalize_collector_number, normalize_set_code
 
 COLLECTION_BATCH_SIZE = 75  # Scryfall's hard maximum per /cards/collection request
@@ -287,7 +289,9 @@ def resolve_offline(
 ) -> list["Resolution"]:
     """Match entries against already-loaded cards (e.g. from a bulk file), no network.
 
-    Same matching and fallback order as :meth:`ScryfallClient.resolve_entries`::
+    The ladder is :mod:`mtg_toolkits.matching`'s: id, set and number (also with the set a retired code such as
+    ``MB1`` went to), name and set, name and collector number, then name alone; the printing among several candidates
+    is picked by :func:`mtg_toolkits.matching.choose`. ``method`` says which step matched::
 
         cards = (Card.from_json(o) for o in iter_bulk_file("default-cards.jsonl.gz"))
         results = resolve_offline(entries, cards)
@@ -297,25 +301,20 @@ def resolve_offline(
         keys = index_keys(entries)
         cards = (Card.from_json(o) for o in iter_bulk_file(path) if card_matches_keys(o, keys))
     """
-    index = _CardIndex(list(cards))
-    steps = _steps(fallback)
+    cards = list(cards)
+    by_id = {c.id: c for c in cards}
+    index = PrintingIndex(Printing.from_card(c) for c in cards)
     results = []
     for entry in entries:
-        for step, make in steps:
-            ident = make(entry)
-            card = index.find(ident, entry.language) if ident else None
-            if card is not None:
-                results.append(Resolution(entry, card, _ident_method(ident) if step == "primary" else step))
-                break
-        else:
-            results.append(Resolution(entry, None, None))
+        found = index.match(entry, fallback=fallback)
+        results.append(Resolution(entry, by_id[found.printing.id] if found.printing else None, found.method))
     return results
 
 
 class Resolution(NamedTuple):
     entry: CollectionEntry
     card: Card | None
-    method: str | None  # "id" | "set_number" | "name_set" | "name" | None
+    method: str | None  # "id" | "set_number" | "name_set" | "name_number" | "name" | None
 
 
 def _front(name: str) -> str:
@@ -352,28 +351,15 @@ def _card_keys(raw: dict[str, Any]) -> Iterator[tuple]:
         yield ("name", n)
 
 
-def _ident_key_for_index(ident: dict[str, str]) -> tuple:
-    if "id" in ident:
-        return ("id", ident["id"])
-    if "collector_number" in ident:
-        return _set_number_key(ident["set"], ident["collector_number"])
-    return ("name", ident["name"].lower())
-
-
 def index_keys(entries: Iterable[CollectionEntry], *, fallback: bool = True) -> set[tuple]:
     """The lookup keys matching ``entries`` can use: ``("id", id)``, ``("set_number", set, number)``
-    and ``("name", lower-case name)``, normalised exactly as matching normalises them.
+    (also with the set a retired code went to) and ``("name", lower-case name)``, normalised exactly as
+    matching normalises them (:func:`mtg_toolkits.matching.index_keys`).
 
     Pair with :func:`card_matches_keys` to skip, while streaming a bulk file, every card
     that :func:`resolve_offline` (with the same ``fallback``) could never pick.
     """
-    keys = set()
-    for e in entries:
-        for _, make in _steps(fallback):
-            ident = make(e)
-            if ident:
-                keys.add(_ident_key_for_index(ident))
-    return keys
+    return _index_keys(entries, fallback=fallback)
 
 
 def card_matches_keys(card: dict[str, Any] | Card, keys: set[tuple]) -> bool:

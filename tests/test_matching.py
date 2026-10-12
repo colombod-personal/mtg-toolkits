@@ -3,7 +3,8 @@ name + collector number, name; and the stated rule for picking a printing. Synth
 
 import random
 
-from mtg_toolkits.matching import EXACT_METHODS, AliasProof, Printing, PrintingIndex, choose, derive_set_aliases, index_keys
+from mtg_toolkits.matching import (EXACT_METHODS, AliasProof, Printing, PrintingIndex, choose, derive_set_aliases, index_keys,
+                                  pick)
 from mtg_toolkits.models import CollectionEntry, Finish
 from mtg_toolkits.normalize import fallback_set_code, set_code_fallbacks, normalize_set_code, set_alias_map
 from mtg_toolkits.scryfall import Card, card_matches_keys, resolve_offline
@@ -156,3 +157,103 @@ def test_the_alias_tables():
     copy = set_code_fallbacks()
     copy["mb1"] = "nope"
     assert fallback_set_code("mb1") == "plst"
+
+
+# -- the review's cases: ambiguity, the name check on a fallback, precedence, the rule's edges ----------------------------
+
+
+def test_name_and_number_in_several_sets_says_so_and_by_how_much():
+    five = [p("a", "Test Old Border", "2ed", "76", usd=900.0), p("b", "Test Old Border", "3ed", "76", usd=60.0),
+            p("c", "Test Old Border", "cei", "76", usd=30.0), p("d", "Test Old Border", "leb", "76", usd=4000.0),
+            p("e", "Test Old Border", "ced", "76", usd=35.0), p("other", "Test Old Border", "4ed", "77", usd=1.0)]
+    m = PrintingIndex(five).match(CollectionEntry("Test Old Border", set_code="FWB", collector_number="76"))
+    assert (m.printing.id, m.method, m.candidates, m.lowest, m.highest) == ("c", "name_number", 5, 30.0, 4000.0)
+    assert m.ambiguous and not m.exact
+    one = PrintingIndex(five[:1]).match(CollectionEntry("Test Old Border", set_code="FWB", collector_number="76"))
+    assert (one.method, one.candidates, one.ambiguous) == ("name_number", 1, False)
+    exact = PrintingIndex(five).match(CollectionEntry("Test Old Border", set_code="2ed", collector_number="76"))
+    assert exact.exact and not exact.ambiguous
+    # the same through resolve_offline: the range is on the Resolution
+    cards = [Card.from_json({"id": x.id, "name": x.name, "set": x.set_code, "collector_number": x.collector_number,
+                             "prices": {"usd": str(x.usd)}}) for x in five]
+    [res] = resolve_offline([CollectionEntry("Test Old Border", set_code="FWB", collector_number="76")], cards)
+    assert (res.card.id, res.method, res.candidates, res.lowest, res.highest) == ("c", "name_number", 5, 30.0, 4000.0)
+
+
+def test_a_fallback_code_never_ties_a_row_to_another_card_with_that_number():
+    cat = [p("dax-258", "Daxos, Blessed by the Sun", "thb", "258", usd=0.4), p("other-259", "Some Other Card", "thb", "259", usd=1.0),
+           p("dax-7", "Daxos, Blessed by the Sun", "thb", "7", usd=0.1)]
+    wrong = CollectionEntry("Daxos, Blessed by the Sun", set_code="VTHB", collector_number="259")
+    m = PrintingIndex(cat).match(wrong)
+    assert m.printing.id == "dax-7" and m.method == "name_set"  # the card, not thb/259's card, and not called exact
+    assert PrintingIndex(cat).match(wrong, fallback=False) == (None, None, 1, None, None)
+    # a double-faced card is still its own printing under a face's name
+    cat.append(p("fire", "Fire // Ice", "thb", "300", usd=0.3))
+    assert PrintingIndex(cat).match(CollectionEntry("Ice", set_code="VTHB", collector_number="300")).method == "set_number"
+
+
+def test_several_sets_sharing_a_number_are_chosen_by_language_then_price_then_order():
+    cat = [p("z-en", "X", "zzz", "5", usd=2.0), p("a-en", "X", "aaa", "5", usd=2.0), p("m-en", "X", "mmm", "5", usd=1.5),
+           p("m-de", "X", "mmm", "5", lang="de", usd=9.0), p("n-en", "X", "nnn", "5", usd=None)]
+    idx = PrintingIndex(cat)
+    assert idx.match(CollectionEntry("X", set_code="QQQ", collector_number="5")).printing.id == "m-en"  # cheapest English
+    assert idx.match(CollectionEntry("X", set_code="QQQ", collector_number="5", language="de")).printing.id == "m-de"
+    tied = PrintingIndex([c for c in cat if c.id in ("z-en", "a-en")] + [p("a-en2", "X", "aaa", "5", usd=2.0)])
+    for _ in range(4):
+        shuffled = list(tied.by_name_num[("x", "5")])
+        random.shuffle(shuffled)
+        assert PrintingIndex(shuffled).match(CollectionEntry("X", set_code="QQQ", collector_number="5")).printing.id == "a-en"
+
+
+def test_a_catalog_holding_the_retired_code_and_its_set_keeps_the_precedence_of_the_steps():
+    cat = [p("mb1-1607", "Counterspell", "mb1", "1607", usd=5.0), p("plst-1607", "Counterspell", "plst", "1607", usd=1.0),
+           p("cs-cmr", "Counterspell", "plst", "CMR-395", usd=0.5)]
+    entry = CollectionEntry("Counterspell", set_code="MB1", collector_number="1607")
+    assert PrintingIndex(cat).match(entry).printing.id == "mb1-1607"  # the code as written first, though dearer
+    assert PrintingIndex(cat[1:]).match(entry).printing.id == "plst-1607"  # then its fallback set with that number
+    assert PrintingIndex(cat[2:]).match(entry) == PrintingIndex(cat[2:]).match(entry)
+    only_name_set = PrintingIndex([cat[2], p("bolt", "Lightning Bolt", "m11", "1607", usd=1.0)]).match(entry)
+    assert (only_name_set.printing.id, only_name_set.method) == ("cs-cmr", "name_set")  # not name_number: m11/1607 is another card
+    # name + set comes before name + number: the same name with that number in another set loses to the set
+    other = [p("cs-a25", "Counterspell", "a25", "1607", usd=0.1), cat[2]]
+    assert PrintingIndex(other).match(entry).printing.id == "cs-cmr"
+
+
+def test_a_token_or_memorabilia_printing_is_never_the_cheapest_pick_and_an_unpriced_finish_falls_back_to_a_price():
+    cat = [p("wc", "Force of Will", "wc97", "jk28", usd=26.0)._replace(regular=False), p("dmr", "Force of Will", "dmr", "284", usd=56.0),
+           p("all", "Force of Will", "all", "28", usd=90.0)]
+    assert choose(cat).id == "dmr"  # a memorabilia printing is not what a person owns
+    only_odd = [cat[0]]
+    assert choose(only_odd).id == "wc"  # but a card with nothing else still has a printing
+    # a foil row, none priced in foil: the cheapest in any finish, not the alphabetical set code (2ed $900 over cei $30)
+    nofoil = [p("2ed", "X", "2ed", "76", usd=900.0), p("cei", "X", "cei", "76", usd=30.0)]
+    assert choose(nofoil, finish=Finish.FOIL).id == "cei"
+    got = pick(nofoil, finish=Finish.FOIL)
+    assert (got.candidates, got.lowest, got.highest) == (2, 30.0, 900.0)
+
+
+def test_a_card_from_scryfall_knows_whether_it_is_a_regular_printing():
+    def card(**extra):
+        return Card.from_json({"id": "x", "name": "N", "set": "s", "collector_number": "1", **extra})
+
+    assert Printing.from_card(card()).regular
+    for odd in ({"set_type": "memorabilia"}, {"layout": "art_series"}, {"digital": True}, {"oversized": True},
+                {"layout": "token"}, {"set_type": "token"}):
+        assert not Printing.from_card(card(**odd)).regular, odd
+
+
+def test_a_resolution_still_unpacks_as_entry_card_method():
+    bulk = [Card.from_json({"id": "a", "name": "Sol Ring", "set": "c21", "collector_number": "263"})]
+    [res] = resolve_offline([CollectionEntry("Sol Ring", set_code="C21", collector_number="263")], bulk)
+    entry, card, method = res
+    assert (card.id, method, res[2], len(res), res.candidates) == ("a", "set_number", "set_number", 3, 1)
+
+
+def test_the_tie_break_is_set_code_then_number_not_the_id_and_the_written_set_beats_its_fallback():
+    # same price: the lowest set code wins although its id sorts last
+    cat = [p("a-id", "X", "s9", "1", usd=1.0), p("b-id", "X", "s1", "9", usd=1.0), p("c-id", "X", "s1", "2", usd=1.0)]
+    assert choose(cat).id == "c-id"
+    # a name in both the set the file wrote and that code's fallback set: the written set first
+    both = [p("in-mb1", "Counterspell", "mb1", "2", usd=9.0), p("in-plst", "Counterspell", "plst", "CMR-395", usd=1.0)]
+    m = PrintingIndex(both).match(CollectionEntry("Counterspell", set_code="MB1", collector_number="1607"))
+    assert (m.printing.id, m.method) == ("in-mb1", "name_set")

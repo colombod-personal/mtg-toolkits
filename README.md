@@ -99,7 +99,7 @@ from mtg_toolkits.scryfall import Card, card_matches_keys, index_keys, iter_bulk
 
 keys = index_keys(entries)               # ids, (set, number) pairs and names, normalised like the matcher
 cards = (Card.from_json(o) for o in iter_bulk_file("all-cards.jsonl.gz") if card_matches_keys(o, keys))
-results = resolve_offline(entries, cards)  # prefers the entry's language, then English
+results = resolve_offline(entries, cards)  # id, set + number, name + set, name + number, name; see mtg_toolkits.matching
 ```
 
 ## Tests

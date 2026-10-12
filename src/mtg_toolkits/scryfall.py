@@ -241,7 +241,9 @@ class ScryfallClient(BaseClient):
         Each distinct identifier is sent once. When ``fallback`` is on, entries
         that don't resolve are retried by name + set, then by name alone. The
         ``method`` on each result says which step matched (``"id"``,
-        ``"set_number"``, ``"name_set"``, ``"name"``) or is ``None`` when nothing did.
+        ``"set_number"``, ``"name_set"``, ``"name"``) or is ``None`` when nothing did. This is the online ladder;
+        :func:`resolve_offline` and :class:`mtg_toolkits.matching.PrintingIndex` have the longer one (also name +
+        collector number, a fallback set for retired codes, and a stated rule for the printing).
         Set codes and collector numbers are normalised (:mod:`mtg_toolkits.normalize`),
         and when several printings match, the one in the entry's language wins, then English.
         """
@@ -307,14 +309,32 @@ def resolve_offline(
     results = []
     for entry in entries:
         found = index.match(entry, fallback=fallback)
-        results.append(Resolution(entry, by_id[found.printing.id] if found.printing else None, found.method))
+        results.append(Resolution(entry, by_id[found.printing.id] if found.printing else None, found.method,
+                                  found.candidates if found.printing else 1, found.lowest, found.highest))
     return results
 
 
-class Resolution(NamedTuple):
+@dataclass(frozen=True)
+class Resolution:
+    """The card a row matched and how. It unpacks as ``(entry, card, method)``, as it always has; the rest are read by name."""
+
     entry: CollectionEntry
     card: Card | None
     method: str | None  # "id" | "set_number" | "name_set" | "name_number" | "name" | None
+    # How many printings the rule chose among, and their lowest and highest price in the entry's finish (the offline
+    # matcher only): ``candidates`` > 1 with a method other than "id" or "set_number" means the file did not say which.
+    candidates: int = 1
+    lowest: float | None = None
+    highest: float | None = None
+
+    def __iter__(self):
+        return iter((self.entry, self.card, self.method))
+
+    def __len__(self) -> int:
+        return 3
+
+    def __getitem__(self, index):
+        return (self.entry, self.card, self.method)[index]
 
 
 def _front(name: str) -> str:

@@ -6,8 +6,8 @@ sync that follows it say the same thing. The first step that finds a card wins; 
 
 1. ``"id"``: the Scryfall id in the file.
 2. ``"set_number"``: set code and collector number, as :mod:`mtg_toolkits.normalize` reads them. A code Scryfall
-   retired in favour of another set (:data:`~mtg_toolkits.normalize.MERGED_SET_CODES`, ``MB1`` -> ``PLST``) is
-   tried with that set only after the code as written found nothing.
+   the catalog does not hold as a set (:data:`~mtg_toolkits.normalize.SET_CODE_FALLBACKS`: ``VTHB`` -> ``THB``,
+   ``MB1`` -> ``PLST``) is tried with that set only after the code as written found nothing.
 3. ``"name_set"``: the card's name in that set (or its merged set), when the number is not the catalog's.
 4. ``"name_number"``: the card's name with that collector number in any set. This is what finds Dragon Shield's
    own variant sets (``VTHB/258`` is Theros Beyond Death 258) without a list of them.
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, NamedTuple
 
 from .models import CollectionEntry, Finish
-from .normalize import merged_set_code, normalize_collector_number, normalize_set_code
+from .normalize import fallback_set_code, normalize_collector_number, normalize_set_code
 
 EXACT_METHODS = ("id", "set_number")  # the printing the file names; the other methods found the card, not the printing
 
@@ -124,7 +124,7 @@ class PrintingIndex:
             found = choose(self.by_set_num.get((code, number), ()), language, finish)
             if found:
                 return Match(found, "set_number")
-        merged = merged_set_code(code) if fallback else None
+        merged = fallback_set_code(code)
         if merged and number:
             found = choose(self.by_set_num.get((merged, number), ()), language, finish)
             if found:
@@ -157,10 +157,10 @@ def index_keys(entries: Iterable[CollectionEntry], *, fallback: bool = True) -> 
         code, number = normalize_set_code(e.set_code), normalize_collector_number(e.collector_number)
         if code and number:
             keys.add(("set_number", code, number))
+        merged = fallback_set_code(code)
+        if merged and number:
+            keys.add(("set_number", merged, number))
         if fallback:
-            merged = merged_set_code(code)
-            if merged and number:
-                keys.add(("set_number", merged, number))
             if (name := front_face(e.name or "").lower()):
                 keys.add(("name", name))
     return keys
@@ -193,7 +193,7 @@ def derive_set_aliases(entries: Iterable[CollectionEntry], printings: Iterable[P
 
     ``printings`` should hold every printing of the names in the file. ``known_codes`` is the catalog's list of set
     codes (Scryfall's ``/sets``); without it a code is unknown when none of ``printings`` has it. A code that is only
-    in :data:`~mtg_toolkits.normalize.MERGED_SET_CODES` is still reported, so its mapping can be checked.
+    in :data:`~mtg_toolkits.normalize.SET_CODE_FALLBACKS` is still reported, so its mapping can be checked.
     """
     index = PrintingIndex(printings)
     known = {normalize_set_code(c) for c in (known_codes if known_codes is not None else index.set_codes)}

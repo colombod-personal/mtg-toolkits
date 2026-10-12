@@ -289,8 +289,8 @@ def resolve_offline(
 ) -> list["Resolution"]:
     """Match entries against already-loaded cards (e.g. from a bulk file), no network.
 
-    The ladder is :mod:`mtg_toolkits.matching`'s: id, set and number (also with the set a retired code such as
-    ``MB1`` went to), name and set, name and collector number, then name alone; the printing among several candidates
+    The ladder is :mod:`mtg_toolkits.matching`'s: id, set and number (also with the set a code such as
+    ``MB1`` or ``VTHB`` falls back to), name and set, name and collector number, then name alone; the printing among several candidates
     is picked by :func:`mtg_toolkits.matching.choose`. ``method`` says which step matched::
 
         cards = (Card.from_json(o) for o in iter_bulk_file("default-cards.jsonl.gz"))
@@ -353,7 +353,7 @@ def _card_keys(raw: dict[str, Any]) -> Iterator[tuple]:
 
 def index_keys(entries: Iterable[CollectionEntry], *, fallback: bool = True) -> set[tuple]:
     """The lookup keys matching ``entries`` can use: ``("id", id)``, ``("set_number", set, number)``
-    (also with the set a retired code went to) and ``("name", lower-case name)``, normalised exactly as
+    (also with the set a code falls back to) and ``("name", lower-case name)``, normalised exactly as
     matching normalises them (:func:`mtg_toolkits.matching.index_keys`).
 
     Pair with :func:`card_matches_keys` to skip, while streaming a bulk file, every card

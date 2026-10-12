@@ -1,11 +1,11 @@
-"""The matching ladder (mtg_toolkits.matching): id, set + number (with a retired code's set), name + set,
+"""The matching ladder (mtg_toolkits.matching): id, set + number (with a fallback set), name + set,
 name + collector number, name; and the stated rule for picking a printing. Synthetic printings only."""
 
 import random
 
 from mtg_toolkits.matching import EXACT_METHODS, AliasProof, Printing, PrintingIndex, choose, derive_set_aliases, index_keys
 from mtg_toolkits.models import CollectionEntry, Finish
-from mtg_toolkits.normalize import merged_set_code, merged_set_codes, normalize_set_code, set_alias_map
+from mtg_toolkits.normalize import fallback_set_code, set_code_fallbacks, normalize_set_code, set_alias_map
 from mtg_toolkits.scryfall import Card, card_matches_keys, resolve_offline
 
 
@@ -33,22 +33,22 @@ def match(entry, printings=CATALOG, **kwargs):
     return (m.printing.id if m.printing else None, m.method)
 
 
-def test_dragon_shield_variant_set_is_found_by_the_code_alias_and_without_it_by_name_and_number():
-    # VTHB is Dragon Shield's own code: the alias reads it as thb, so the printing is the one the file names.
+def test_dragon_shield_variant_set_is_found_by_the_code_fallback_and_without_it_by_name_and_number():
+    # VTHB is Dragon Shield's own code: its fallback is thb, so the printing is the one the file names.
     assert match(CollectionEntry("Daxos, Blessed by the Sun", set_code="VTHB", collector_number="258")) == ("dax-258", "set_number")
     # a code nobody listed: the card's name and that collector number are the printing
     assert match(CollectionEntry("Daxos, Blessed by the Sun", set_code="VXXX", collector_number="258")) == ("dax-258", "name_number")
 
 
-def test_retired_codes_use_the_set_that_took_their_cards_only_when_the_code_has_no_printing():
+def test_fallback_codes_use_their_set_only_when_the_code_has_no_printing():
     entry = CollectionEntry("Counterspell", set_code="MB1", collector_number="1607")
     # no printing is numbered 1607: the card in The List, found by name in the set MB1 became
     assert match(entry) == ("cs-cmr", "name_set")
-    assert merged_set_code("MB1") == "plst" and merged_set_code(" fmb1 ") == "plst" and merged_set_code("thb") is None
+    assert fallback_set_code("MB1") == "plst" and fallback_set_code(" fmb1 ") == "plst" and fallback_set_code("thb") is None
     # a catalog that does hold a printing under the old code wins over the alias
     old = p("mb1-1607", "Counterspell", "mb1", "1607", usd=5.0)
     assert match(entry, CATALOG + [old]) == ("mb1-1607", "set_number")
-    # the retired code and the number the list uses in the merged set
+    # the code and the number the list uses in the set it falls back to
     assert match(CollectionEntry("Counterspell", set_code="PLIST", collector_number="CMR-395")) == ("cs-cmr", "set_number")
     assert match(CollectionEntry("Counterspell", set_code="MB1", collector_number="CMR-395")) == ("cs-cmr", "set_number")
 
@@ -147,10 +147,12 @@ def test_resolve_offline_uses_the_same_ladder_and_its_keys_keep_what_it_needs():
 
 
 def test_the_alias_tables():
-    assert normalize_set_code("VTHB") == "thb"
-    assert normalize_set_code("MB1") == "mb1"  # retired codes are not rewritten: matching tries the merged set second
-    assert "vthb" in set_alias_map() and "mb1" not in set_alias_map()
-    assert merged_set_codes()["pagl"] == "plst"
-    copy = merged_set_codes()
+    assert normalize_set_code("GK2_ORZHOV") == "gk2" and "gk2_orzhov" in set_alias_map()
+    # fallbacks are not rewritten (a row keeps the code it was written with): matching tries the fallback set second
+    assert normalize_set_code("VTHB") == "vthb" and normalize_set_code("MB1") == "mb1"
+    assert "vthb" not in set_alias_map() and "mb1" not in set_alias_map()
+    assert set_code_fallbacks()["vthb"] == "thb"
+    assert set_code_fallbacks()["pagl"] == "plst"
+    copy = set_code_fallbacks()
     copy["mb1"] = "nope"
-    assert merged_set_code("mb1") == "plst"
+    assert fallback_set_code("mb1") == "plst"

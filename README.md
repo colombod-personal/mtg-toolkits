@@ -12,6 +12,7 @@ A Python library for Magic: The Gathering projects: card data, pricing, decks an
 | `mtg_toolkits.delta` | Diffs collection snapshots (added/removed/changed), writes only the changes, deck coverage (owned/partial/missing) |
 | `mtg_toolkits.decklist` | Parses pasted decklists (Archidekt, Moxfield, Arena, MTGO formats, sections, foil/etched) and deck URLs |
 | `mtg_toolkits.enrich` | Joins a collection with Scryfall text, attributes and prices, and writes a report |
+| `mtg_toolkits.matching` | The matching ladder (id, set + number, name + set, name + collector number, name) with a stated rule for the printing, and `derive_set_aliases` to check a file's unknown set codes against the catalog |
 | `mtg_toolkits.normalize` | Set code / collector number normalisation (Dragon Shield aliases) and locale-tolerant number parsing |
 
 See [`docs/research.md`](docs/research.md) for API notes, limits, file formats and the pricing strategy.
@@ -98,7 +99,7 @@ from mtg_toolkits.scryfall import Card, card_matches_keys, index_keys, iter_bulk
 
 keys = index_keys(entries)               # ids, (set, number) pairs and names, normalised like the matcher
 cards = (Card.from_json(o) for o in iter_bulk_file("all-cards.jsonl.gz") if card_matches_keys(o, keys))
-results = resolve_offline(entries, cards)  # prefers the entry's language, then English
+results = resolve_offline(entries, cards)  # id, set + number, name + set, name + number, name; see mtg_toolkits.matching
 ```
 
 ## Tests

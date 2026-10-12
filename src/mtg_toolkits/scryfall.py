@@ -27,6 +27,8 @@ from urllib.parse import quote
 
 from .http import ApiError, BaseClient, Throttle
 from .models import CollectionEntry, Finish
+from .matching import Printing, PrintingIndex
+from .matching import index_keys as _index_keys
 from .normalize import _clean_number, normalize_collector_number, normalize_set_code
 
 COLLECTION_BATCH_SIZE = 75  # Scryfall's hard maximum per /cards/collection request
@@ -239,7 +241,9 @@ class ScryfallClient(BaseClient):
         Each distinct identifier is sent once. When ``fallback`` is on, entries
         that don't resolve are retried by name + set, then by name alone. The
         ``method`` on each result says which step matched (``"id"``,
-        ``"set_number"``, ``"name_set"``, ``"name"``) or is ``None`` when nothing did.
+        ``"set_number"``, ``"name_set"``, ``"name"``) or is ``None`` when nothing did. This is the online ladder;
+        :func:`resolve_offline` and :class:`mtg_toolkits.matching.PrintingIndex` have the longer one (also name +
+        collector number, a fallback set for retired codes, and a stated rule for the printing).
         Set codes and collector numbers are normalised (:mod:`mtg_toolkits.normalize`),
         and when several printings match, the one in the entry's language wins, then English.
         """
@@ -287,7 +291,9 @@ def resolve_offline(
 ) -> list["Resolution"]:
     """Match entries against already-loaded cards (e.g. from a bulk file), no network.
 
-    Same matching and fallback order as :meth:`ScryfallClient.resolve_entries`::
+    The ladder is :mod:`mtg_toolkits.matching`'s: id, set and number (also with the set a code such as
+    ``MB1`` or ``VTHB`` falls back to), name and set, name and collector number, then name alone; the printing among several candidates
+    is picked by :func:`mtg_toolkits.matching.choose`. ``method`` says which step matched::
 
         cards = (Card.from_json(o) for o in iter_bulk_file("default-cards.jsonl.gz"))
         results = resolve_offline(entries, cards)
@@ -297,25 +303,38 @@ def resolve_offline(
         keys = index_keys(entries)
         cards = (Card.from_json(o) for o in iter_bulk_file(path) if card_matches_keys(o, keys))
     """
-    index = _CardIndex(list(cards))
-    steps = _steps(fallback)
+    cards = list(cards)
+    by_id = {c.id: c for c in cards}
+    index = PrintingIndex(Printing.from_card(c) for c in cards)
     results = []
     for entry in entries:
-        for step, make in steps:
-            ident = make(entry)
-            card = index.find(ident, entry.language) if ident else None
-            if card is not None:
-                results.append(Resolution(entry, card, _ident_method(ident) if step == "primary" else step))
-                break
-        else:
-            results.append(Resolution(entry, None, None))
+        found = index.match(entry, fallback=fallback)
+        results.append(Resolution(entry, by_id[found.printing.id] if found.printing else None, found.method,
+                                  found.candidates if found.printing else 1, found.lowest, found.highest))
     return results
 
 
-class Resolution(NamedTuple):
+@dataclass(frozen=True)
+class Resolution:
+    """The card a row matched and how. It unpacks as ``(entry, card, method)``, as it always has; the rest are read by name."""
+
     entry: CollectionEntry
     card: Card | None
-    method: str | None  # "id" | "set_number" | "name_set" | "name" | None
+    method: str | None  # "id" | "set_number" | "name_set" | "name_number" | "name" | None
+    # How many printings the rule chose among, and their lowest and highest price in the entry's finish (the offline
+    # matcher only): ``candidates`` > 1 with a method other than "id" or "set_number" means the file did not say which.
+    candidates: int = 1
+    lowest: float | None = None
+    highest: float | None = None
+
+    def __iter__(self):
+        return iter((self.entry, self.card, self.method))
+
+    def __len__(self) -> int:
+        return 3
+
+    def __getitem__(self, index):
+        return (self.entry, self.card, self.method)[index]
 
 
 def _front(name: str) -> str:
@@ -352,28 +371,15 @@ def _card_keys(raw: dict[str, Any]) -> Iterator[tuple]:
         yield ("name", n)
 
 
-def _ident_key_for_index(ident: dict[str, str]) -> tuple:
-    if "id" in ident:
-        return ("id", ident["id"])
-    if "collector_number" in ident:
-        return _set_number_key(ident["set"], ident["collector_number"])
-    return ("name", ident["name"].lower())
-
-
 def index_keys(entries: Iterable[CollectionEntry], *, fallback: bool = True) -> set[tuple]:
     """The lookup keys matching ``entries`` can use: ``("id", id)``, ``("set_number", set, number)``
-    and ``("name", lower-case name)``, normalised exactly as matching normalises them.
+    (also with the set a code falls back to) and ``("name", lower-case name)``, normalised exactly as
+    matching normalises them (:func:`mtg_toolkits.matching.index_keys`).
 
     Pair with :func:`card_matches_keys` to skip, while streaming a bulk file, every card
     that :func:`resolve_offline` (with the same ``fallback``) could never pick.
     """
-    keys = set()
-    for e in entries:
-        for _, make in _steps(fallback):
-            ident = make(e)
-            if ident:
-                keys.add(_ident_key_for_index(ident))
-    return keys
+    return _index_keys(entries, fallback=fallback)
 
 
 def card_matches_keys(card: dict[str, Any] | Card, keys: set[tuple]) -> bool:

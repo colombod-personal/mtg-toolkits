@@ -11,6 +11,10 @@ from the few Dragon Shield-only codes to Scryfall's:
 A front end that can't call Python can ship ``set_alias_map()`` and
 ``SET_ALIAS_PREFIXES`` as JSON and apply the same two steps.
 
+Codes the catalog does not hold as a set (``"vthb"`` -> ``"thb"``, ``"mb1"`` -> ``"plst"``) are not rewritten
+here, so a row keeps the code it was written with: :func:`fallback_set_code` gives the set their cards are in, and
+:mod:`mtg_toolkits.matching` tries it only after the code as written found nothing.
+
 Collector numbers (:func:`normalize_collector_number`) are compared stripped,
 lower-cased, with ``*`` read as ``★`` and leading zeros dropped (``"007a"`` -> ``"7a"``).
 
@@ -44,6 +48,15 @@ SET_ALIASES = {
 }
 SET_ALIAS_PREFIXES = ("gk1_", "gk2_")  # any other code with these prefixes maps to its first 3 characters
 
+# Codes a file can carry that the catalog does not hold as a set, and the set its cards are in. Unlike SET_ALIASES they are
+# not rewritten when a file is read (a row keeps the code it was written with, so a stored row's identity and an export never
+# change): :mod:`mtg_toolkits.matching` tries the mapped set only after the code as written found nothing, so a catalog that
+# does hold a printing under the code still wins. The evidence for each is in docs/research.md:
+# - ``vthb``: Dragon Shield's variants of Theros Beyond Death; the same name and collector number are in thb.
+# - the rest: Scryfall's API answers each with The List (``GET /sets/mb1`` is the set ``plst``) and no printing has them
+#   (``cards/mb1/1607`` is a 404).
+SET_CODE_FALLBACKS = {"vthb": "thb", "mb1": "plst", "fmb1": "plst", "phed": "plst", "pagl": "plst", "plist": "plst"}
+
 MAX_QUANTITY = 1_000_000  # copies on one line; anything above is a broken file
 
 _CURRENCY = str.maketrans("", "", "$€£  ")
@@ -60,6 +73,16 @@ def set_alias_map() -> dict[str, str]:
     Also apply the :data:`SET_ALIAS_PREFIXES` rule, or just call :func:`normalize_set_code`.
     """
     return dict(SET_ALIASES)
+
+
+def set_code_fallbacks() -> dict[str, str]:
+    """The codes the catalog lacks and the set their cards are in (lower-case), as a copy: see :data:`SET_CODE_FALLBACKS`."""
+    return dict(SET_CODE_FALLBACKS)
+
+
+def fallback_set_code(code: str | None) -> str | None:
+    """The set the cards of ``code`` are in, or None when ``code`` has no fallback."""
+    return SET_CODE_FALLBACKS.get((code or "").strip().lower())
 
 
 def normalize_set_code(code: str | None) -> str | None:
